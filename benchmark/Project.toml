@@ -1,0 +1,13 @@
+[deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+Mimosa = "2e41fa5d-e7f2-4070-8a6b-25ce77bfeb85"
+Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+
+[compat]
+BenchmarkTools = "1"
+Dates = "1.10"
+Pkg = "1.10"
+Random = "1.10"
+julia = "1.10"

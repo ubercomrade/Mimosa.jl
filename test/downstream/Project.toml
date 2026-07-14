@@ -1,0 +1,6 @@
+[deps]
+Mimosa = "2e41fa5d-e7f2-4070-8a6b-25ce77bfeb85"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[compat]
+julia = "1.10"

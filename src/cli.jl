@@ -1,0 +1,995 @@
+# Stage 8 CLI: thin adapter from command-line arguments to the public Mimosa API.
+#
+# Design: a small self-contained subcommand parser (no external dependency).
+# Each subcommand maps to a typed configuration, calls the public API, and
+# serializes results as JSON to stdout. Diagnostics and progress go to stderr.
+#
+# Exit codes:
+#   0 = success
+#   1 = usage error / invalid arguments
+#   2 = runtime error (file not found, malformed input, etc.)
+#
+# JSON output goes to stdout only. Logs and errors go to stderr only.
+
+const CLI_VERSION = string(Base.pkgversion(@__MODULE__))
+
+const MODEL_TYPES = ["pwm", "bamm", "sitega", "dimont", "slim"]
+const PROFILE_MODEL_TYPES = ["scores", MODEL_TYPES...]
+const PROFILE_METRICS = ["co", "co_rowwise", "dice", "dice_rowwise", "cosine"]
+
+# ── Typed command option specifications ─────────────────────────────────────
+#
+# Each command has a static option spec (which --options take values) and a
+# set of flag names (boolean --flags). These are defined as constants here,
+# separate from both the parser and the runners, so that adding a new option
+# requires only updating the spec, not the main() dispatch.
+
+const PROFILE_OPTIONS = Dict{String,Bool}(
+    "model1-type" => true,
+    "model2-type" => true,
+    "metric" => true,
+    "search-range" => true,
+    "window-radius" => true,
+    "realign-window" => true,
+    "min-logfpr" => true,
+    "fasta" => true,
+    "background" => true,
+    "num-sequences" => true,
+    "seq-length" => true,
+    "seed" => true,
+    "background-freq" => true,
+    "threads" => true,
+    "null-distribution" => true,
+    "effective-number-of-targets" => true,
+)
+const PROFILE_FLAGS = Set(["pvalue", "quiet", "verbose"])
+
+const BUILD_NULL_OPTIONS = Dict{String,Bool}(
+    "model-type" => true,
+    "groups" => true,
+    "output" => true,
+    "name-column" => true,
+    "group-column" => true,
+    "metric" => true,
+    "fasta" => true,
+    "num-sequences" => true,
+    "seq-length" => true,
+    "seed" => true,
+    "search-range" => true,
+    "window-radius" => true,
+    "realign-window" => true,
+    "min-logfpr" => true,
+    "min-null-targets" => true,
+    "threads" => true,
+    "jobs" => true,
+)
+const BUILD_NULL_FLAGS = Set(["ignore-missing", "strict", "quiet", "verbose"])
+
+const CACHE_OPTIONS = Dict{String,Bool}("cache-dir" => true, "threads" => true)
+const CACHE_FLAGS = Set(["quiet", "verbose"])
+
+const INSPECT_OPTIONS = Dict{String,Bool}(
+    "type" => true, "index" => true, "background" => true
+)
+const INSPECT_FLAGS = Set(["quiet", "verbose"])
+
+const CONVERT_OPTIONS = Dict{String,Bool}(
+    "type" => true, "index" => true, "background" => true
+)
+const CONVERT_FLAGS = Set(["quiet", "verbose"])
+
+# Map command name to (option_spec, flag_spec) for dispatch.
+const COMMAND_SPECS = Dict{
+    String,NamedTuple{(:options, :flags),Tuple{Dict{String,Bool},Set{String}}}
+}(
+    "profile" => (options=PROFILE_OPTIONS, flags=PROFILE_FLAGS),
+    "build-null" => (options=BUILD_NULL_OPTIONS, flags=BUILD_NULL_FLAGS),
+    "cache" => (options=CACHE_OPTIONS, flags=CACHE_FLAGS),
+    "inspect-model" => (options=INSPECT_OPTIONS, flags=INSPECT_FLAGS),
+    "convert-model" => (options=CONVERT_OPTIONS, flags=CONVERT_FLAGS),
+)
+
+# ── CLI argument parsing ────────────────────────────────────────────────────
+#
+# Layer 1: Parser. Parses raw command-line arguments into a CLIParsed struct
+# (command name, positional args, option dict, flag set). Does NOT perform
+# scientific validation or call the Mimosa API. Validation is done by runners.
+
+struct CLIError <: Exception
+    message::String
+end
+
+struct CLIParsed
+    command::String
+    positional::Vector{String}
+    options::Dict{String,String}
+    flags::Set{String}
+end
+
+function _cli_int(parsed::CLIParsed, name::String, default::String; minimum=nothing)
+    value = tryparse(Int, get(parsed.options, name, default))
+    value === nothing && throw(CLIError("--$name must be an integer."))
+    minimum !== nothing &&
+        value < minimum &&
+        throw(CLIError("--$name must be at least $minimum."))
+    return value
+end
+
+function _cli_float32(parsed::CLIParsed, name::String, default::String)
+    value = tryparse(Float32, get(parsed.options, name, default))
+    value === nothing && throw(CLIError("--$name must be a finite Float32."))
+    isfinite(value) || throw(CLIError("--$name must be a finite Float32."))
+    return value
+end
+
+function CLIParsed(command::String)
+    return CLIParsed(command, String[], Dict{String,String}(), Set{String}())
+end
+
+function _print_global_help(io::IO)
+    println(io, "mimosa $(CLI_VERSION) — motif comparison and statistical evaluation")
+    println(io, "")
+    println(io, "Usage: mimosa <command> [options]")
+    println(io, "")
+    println(io, "Commands:")
+    println(io, "  profile       Profile-based comparison (scan → normalize → compare)")
+    println(
+        io, "  build-null    Build a null distribution from unrelated motif comparisons"
+    )
+    println(io, "  cache         Manage disk cache (clear)")
+    println(io, "  inspect-model Display model metadata and dimensions")
+    println(io, "  convert-model Convert a legacy model file to portable Mimosa format")
+    println(io, "")
+    println(io, "Global options:")
+    println(io, "  --help, -h    Show this help message")
+    println(io, "  --version, -V Show version")
+    println(io, "  --quiet       Suppress informational stderr output")
+    println(io, "  --verbose     Enable verbose stderr diagnostics")
+    return nothing
+end
+
+"""
+    _parse_cli(args::Vector{String})
+
+Parse command-line arguments into a command name and parsed options.
+Returns `(command, positional, options, flags)` or throws `CLIError`.
+"""
+function _parse_cli(args::Vector{String})
+    if isempty(args)
+        _print_global_help(stderr)
+        throw(CLIError("no command specified."))
+    end
+
+    idx = 1
+    global_flags = String[]
+    # Check for global flags before command
+    while idx <= length(args) && startswith(args[idx], "-")
+        if args[idx] in ("--help", "-h")
+            _print_global_help(stdout)
+            return nothing
+        elseif args[idx] in ("--version", "-V")
+            println(stdout, "mimosa $(CLI_VERSION)")
+            return nothing
+        elseif args[idx] == "--quiet"
+            push!(global_flags, "--quiet")
+        elseif args[idx] == "--verbose"
+            push!(global_flags, "--verbose")
+        else
+            throw(CLIError("unknown global option: $(args[idx])"))
+        end
+        idx += 1
+    end
+
+    idx > length(args) && throw(CLIError("no command specified."))
+    command = args[idx]
+    idx += 1
+
+    return (command, vcat(global_flags, args[idx:end]))
+end
+
+"""
+    _parse_command_args(args, spec)
+
+Parse command arguments according to a simple spec.
+`spec` is a named tuple with:
+- `positional`: vector of (name, required, help)
+- `options`: vector of (name, takes_value, default, help)
+- `flags`: vector of (name, help)
+
+Returns `CLIParsed` or throws `CLIError`.
+"""
+function _parse_command_args(
+    command::String, args::Vector{String}, positional_names, option_specs, flag_names
+)
+    parsed = CLIParsed(command)
+    i = 1
+    while i <= length(args)
+        arg = args[i]
+        if arg in ("--help", "-h")
+            return :help
+        elseif startswith(arg, "--")
+            key = arg[3:end]
+            if key in flag_names
+                push!(parsed.flags, key)
+            elseif haskey(option_specs, key)
+                i += 1
+                i > length(args) && throw(CLIError("--$(key) requires a value."))
+                parsed.options[key] = args[i]
+            else
+                throw(CLIError("unknown option: --$(key)"))
+            end
+        elseif startswith(arg, "-") && length(arg) > 1
+            # Single-dash flag aliases
+            key = arg[2:end]
+            if key in flag_names
+                push!(parsed.flags, key)
+            else
+                throw(CLIError("unknown flag: -$(key)"))
+            end
+        else
+            push!(parsed.positional, arg)
+        end
+        i += 1
+    end
+    return parsed
+end
+
+# ── Type and model resolution ────────────────────────────────────────────────
+#
+# Shared helpers used by command runners to read models and resolve sequences.
+# These bridge the parsed CLI strings to typed Mimosa API objects.
+
+"""
+    _read_typed_model(path, model_type; kwargs...)
+
+Read a model file using the specified type string.
+"""
+function _read_typed_model(path::AbstractString, model_type::AbstractString; kwargs...)
+    if model_type == "scores"
+        return read_scores(path)
+    elseif model_type == "pwm"
+        return readmodel(path; kwargs...)
+    elseif model_type == "bamm"
+        order_val = get(kwargs, :order, nothing)
+        return read_bamm(path; order=order_val)
+    elseif model_type == "sitega"
+        return read_sitega(path)
+    elseif model_type == "dimont"
+        return read_dimont(path)
+    elseif model_type == "slim"
+        return read_slim(path)
+    else
+        throw(CLIError("unknown model type: $(model_type)"))
+    end
+end
+
+"""
+    _resolve_sequences(fasta_path, num_sequences, seq_length, seed)
+
+Resolve sequences from a FASTA file or generate random ones.
+"""
+function _resolve_sequences(
+    fasta_path::Union{AbstractString,Nothing},
+    num_sequences::Int,
+    seq_length::Int,
+    seed::Int,
+)
+    if fasta_path !== nothing
+        batch, _ = read_fasta(fasta_path)
+        return batch
+    end
+    return make_random_sequences(num_sequences, seq_length; seed=seed)
+end
+
+function _execution_policy(parsed::CLIParsed)
+    threads_str = get(parsed.options, "threads", get(parsed.options, "jobs", "1"))
+    requested = tryparse(Int, threads_str)
+    requested === nothing && throw(CLIError("--threads must be a positive integer."))
+    requested > 0 || throw(CLIError("--threads must be a positive integer."))
+
+    available = Threads.nthreads()
+    requested <= available || throw(
+        CLIError(
+            "--threads=$requested exceeds the $available Julia thread(s) available; " *
+            "start Julia with --threads=$requested or set JULIA_NUM_THREADS=$requested.",
+        ),
+    )
+    return requested == 1 ? SerialExecution() : ThreadedExecution(requested)
+end
+
+# ── JSON output ─────────────────────────────────────────────────────────────
+
+function _json_value(v::Nothing)
+    return "null"
+end
+
+function _json_value(v::AbstractString)
+    return _json_string(v)
+end
+
+function _json_value(v::AbstractFloat)
+    return _json_float(Float64(v))
+end
+
+function _json_value(v::Real)
+    return string(v)
+end
+
+function _json_value(v::Bool)
+    return v ? "true" : "false"
+end
+
+function _json_value(v::AbstractVector)
+    if isempty(v)
+        return "[]"
+    end
+    parts = [_json_value(x) for x in v]
+    return "[" * join(parts, ", ") * "]"
+end
+
+function _json_value(v::AbstractVector{<:AbstractFloat})
+    if isempty(v)
+        return "[]"
+    end
+    parts = [_json_float(Float64(x)) for x in v]
+    return "[" * join(parts, ", ") * "]"
+end
+
+function _json_dict(d::Dict{String})
+    keys_sorted = sort!(collect(keys(d)))
+    parts = String[]
+    for k in keys_sorted
+        push!(parts, _json_string(k) * ": " * _json_value(d[k]))
+    end
+    return "{" * join(parts, ", ") * "}"
+end
+
+function _println_json(d::Dict{String})
+    println(stdout, _json_dict(d))
+    return nothing
+end
+
+function _validate_null_compatibility(
+    dist::NullDistribution;
+    strategy::AbstractString,
+    metric::AbstractString,
+    sequences::Union{Nothing,EncodedSequenceBatch}=nothing,
+    background::Union{Nothing,EncodedSequenceBatch}=nothing,
+)
+    dist.strategy == strategy || throw(
+        CLIError(
+            "null distribution strategy '$(dist.strategy)' is incompatible with $strategy comparison.",
+        ),
+    )
+    dist.metric == metric || throw(
+        CLIError(
+            "null distribution metric '$(dist.metric)' is incompatible with requested metric '$metric'.",
+        ),
+    )
+
+    expected_sequences = isnothing(sequences) ? "none" : sequence_fingerprint(sequences)
+    expected_background = isnothing(background) ? "none" : sequence_fingerprint(background)
+    dist.sequence_fingerprint == expected_sequences || throw(
+        CLIError(
+            "null distribution sequence fingerprint is incompatible with this comparison.",
+        ),
+    )
+    dist.background_fingerprint == expected_background || throw(
+        CLIError(
+            "null distribution background fingerprint is incompatible with this comparison.",
+        ),
+    )
+    return nothing
+end
+
+function _annotate_cli_result(
+    result::ComparisonResult,
+    parsed::CLIParsed;
+    strategy::AbstractString,
+    metric::AbstractString,
+    sequences::Union{Nothing,EncodedSequenceBatch}=nothing,
+    background::Union{Nothing,EncodedSequenceBatch}=nothing,
+)
+    "pvalue" in parsed.flags || return result
+    haskey(parsed.options, "null-distribution") ||
+        throw(CLIError("--pvalue requires an explicit --null-distribution bundle."))
+    dist = loadnull(parsed.options["null-distribution"])
+    _validate_null_compatibility(
+        dist; strategy=strategy, metric=metric, sequences=sequences, background=background
+    )
+    effective = if haskey(parsed.options, "effective-number-of-targets")
+        value = tryparse(Int, parsed.options["effective-number-of-targets"])
+        value === nothing &&
+            throw(CLIError("--effective-number-of-targets must be a positive integer."))
+        value > 0 ||
+            throw(CLIError("--effective-number-of-targets must be a positive integer."))
+        value
+    else
+        nothing
+    end
+    return only(annotate_results([result], dist; effective_number_of_targets=effective))
+end
+
+# ── Command runners (Layer 3) ──────────────────────────────────────────────
+#
+# Each runner takes a parsed CLIParsed, validates scientific options,
+# calls the Mimosa public API, and serializes results as JSON to stdout.
+# Runners do NOT re-parse arguments; they consume the typed CLIParsed struct.
+
+# ── Command: profile ─────────────────────────────────────────────────────────
+
+function _print_profile_help(io::IO)
+    println(
+        io,
+        "Usage: mimosa profile <model1> <model2> --model1-type <type> --model2-type <type> [options]",
+    )
+    println(io, "")
+    println(
+        io, "Compare motifs via score profiles: precomputed scores or profiles from scans."
+    )
+    println(io, "")
+    println(io, "Required arguments:")
+    println(io, "  model1                   Path to first model or score-profile file")
+    println(io, "  model2                   Path to second model or score-profile file")
+    println(io, "  --model1-type <type>     Type: $(join(PROFILE_MODEL_TYPES, ", "))")
+    println(io, "  --model2-type <type>     Type: $(join(PROFILE_MODEL_TYPES, ", "))")
+    println(io, "")
+    println(io, "Profile comparison options:")
+    println(
+        io,
+        "  --metric <name>          Metric: $(join(PROFILE_METRICS, ", ")) (default: co)",
+    )
+    println(io, "  --search-range <n>       Max site-center shift (default: 10)")
+    println(
+        io, "  --window-radius <n>      Window radius in profile positions (default: 10)"
+    )
+    println(io, "  --realign-window <n>     Local realignment half-width (default: 3)")
+    println(io, "  --min-logfpr <f>         Threshold logFPR (0 = best site per sequence)")
+    println(io, "")
+    println(io, "Sequence options:")
+    println(io, "  --fasta <path>            FASTA for motif scanning")
+    println(io, "  --background <path>       FASTA for normalization calibration")
+    println(io, "  --num-sequences <n>       Random sequences if no FASTA (default: 1000)")
+    println(io, "  --seq-length <n>          Random sequence length (default: 200)")
+    println(io, "  --seed <n>                Random seed (default: 127)")
+    println(io, "  --background-freq <f>      Background freq for PWM (default: 0.25)")
+    println(
+        io, "  --pvalue                   Annotate using an explicit compatible null bundle"
+    )
+    println(
+        io, "  --null-distribution <p>    Portable null-distribution bundle for --pvalue"
+    )
+    println(io, "  --effective-number-of-targets <n>  E-value target-count override")
+    println(io, "")
+    println(io, "Technical options:")
+    println(
+        io,
+        "  --threads <n>             Worker threads to use (default: 1; runtime must provide them)",
+    )
+    println(io, "  --quiet                   Suppress informational output")
+    println(io, "  --verbose                 Verbose diagnostics to stderr")
+    return nothing
+end
+
+function _run_profile(parsed::CLIParsed)
+    if length(parsed.positional) != 2
+        _print_profile_help(stderr)
+        throw(CLIError("profile requires two positional arguments."))
+    end
+    path1 = parsed.positional[1]
+    path2 = parsed.positional[2]
+
+    haskey(parsed.options, "model1-type") || throw(CLIError("--model1-type is required."))
+    haskey(parsed.options, "model2-type") || throw(CLIError("--model2-type is required."))
+
+    type1 = parsed.options["model1-type"]
+    type2 = parsed.options["model2-type"]
+    type1 in PROFILE_MODEL_TYPES ||
+        throw(CLIError("--model1-type must be one of: $(join(PROFILE_MODEL_TYPES, ", "))"))
+    type2 in PROFILE_MODEL_TYPES ||
+        throw(CLIError("--model2-type must be one of: $(join(PROFILE_MODEL_TYPES, ", "))"))
+
+    metric = get(parsed.options, "metric", "co")
+    metric in PROFILE_METRICS ||
+        throw(CLIError("--metric must be one of: $(join(PROFILE_METRICS, ", "))"))
+
+    search_range = _cli_int(parsed, "search-range", "10"; minimum=0)
+    window_radius = _cli_int(parsed, "window-radius", "10"; minimum=0)
+    realign_window = _cli_int(parsed, "realign-window", "3"; minimum=0)
+    min_logfpr_str = get(parsed.options, "min-logfpr", nothing)
+    min_logfpr =
+        min_logfpr_str === nothing ? 0.0f0 : _cli_float32(parsed, "min-logfpr", "0.0")
+    isfinite(min_logfpr) || throw(CLIError("--min-logfpr must be finite."))
+    seed = _cli_int(parsed, "seed", "127")
+    num_seq = _cli_int(parsed, "num-sequences", "1000"; minimum=1)
+    seq_len = _cli_int(parsed, "seq-length", "200"; minimum=1)
+    bg_freq = _cli_float32(parsed, "background-freq", "0.25")
+    fasta = get(parsed.options, "fasta", nothing)
+    bg_fasta = get(parsed.options, "background", nothing)
+    execution = _execution_policy(parsed)
+
+    model1 = _read_typed_model(path1, type1; background=bg_freq)
+    model2 = _read_typed_model(path2, type2; background=bg_freq)
+
+    # If both are ScoreProfile, compare directly.
+    sequences = nothing
+    bg_sequences = nothing
+    if model1 isa ScoreProfile && model2 isa ScoreProfile
+        result = compare(
+            model1,
+            model2;
+            metric=metric,
+            search_range=search_range,
+            window_radius=window_radius,
+            realign_window=realign_window,
+            min_logfpr=min_logfpr,
+        )
+    else
+        # Motif-derived profiles: scan → normalize → compare
+        sequences = _resolve_sequences(fasta, num_seq, seq_len, seed)
+        bg_sequences = bg_fasta !== nothing ? read_fasta(bg_fasta)[1] : nothing
+        result = compare(
+            model1,
+            model2,
+            sequences;
+            metric=metric,
+            search_range=search_range,
+            window_radius=window_radius,
+            realign_window=realign_window,
+            min_logfpr=min_logfpr,
+            background=bg_sequences,
+            execution=execution,
+        )
+    end
+
+    annotated = _annotate_cli_result(
+        result,
+        parsed;
+        strategy="profile",
+        metric=metric,
+        sequences=sequences,
+        background=bg_sequences,
+    )
+    _println_json(to_dict(annotated))
+    return 0
+end
+
+# ── Command: build-null ──────────────────────────────────────────────────────
+
+function _print_build_null_help(io::IO)
+    println(
+        io,
+        "Usage: mimosa build-null <motifs> --model-type <type> --groups <path> --output <path> [options]",
+    )
+    println(io, "")
+    println(io, "Build a pooled null distribution from unrelated motif comparisons.")
+    println(io, "")
+    println(io, "Required arguments:")
+    println(
+        io,
+        "  motifs                    Motif collection: directory or multi-motif MEME file",
+    )
+    println(io, "  --model-type <type>       Motif format: $(join(MODEL_TYPES, ", "))")
+    println(io, "  --groups <path>           TSV/CSV with motif and group columns")
+    println(io, "  --output <path>           Output path for null distribution")
+    println(io, "")
+    println(io, "Relation options:")
+    println(io, "  --name-column <s>         Motif-name column (default: motif)")
+    println(io, "  --group-column <s>        Group column (default: group)")
+    println(io, "  --ignore-missing          Ignore relation names not loaded")
+    println(io, "")
+    println(io, "Comparison options:")
+    println(io, "  --metric <name>           Profile metric (default: co)")
+    println(io, "  --fasta <path>            FASTA for profile scanning")
+    println(io, "  --num-sequences <n>       Random sequences (default: 1000)")
+    println(io, "  --seq-length <n>          Random sequence length (default: 200)")
+    println(io, "  --seed <n>                Random seed (default: 127)")
+    println(io, "  --search-range <n>        Max shift (default: 10)")
+    println(io, "  --window-radius <n>       Window radius (default: 10)")
+    println(io, "  --realign-window <n>      Realignment window (default: 3)")
+    println(io, "  --min-logfpr <f>          Threshold logFPR")
+    println(io, "")
+    println(io, "Output options:")
+    println(io, "  --strict                  Fail when a query lacks enough null targets")
+    println(io, "  --min-null-targets <n>    Minimum null targets (default: 1)")
+    println(io, "")
+    println(io, "Technical options:")
+    println(
+        io,
+        "  --threads <n>             Worker threads to use (default: 1; runtime must provide them)",
+    )
+    println(io, "  --jobs <n>                Deprecated alias for --threads")
+    println(io, "  --quiet                   Suppress informational output")
+    println(io, "  --verbose                 Verbose diagnostics to stderr")
+    return nothing
+end
+
+function _read_model_collection(path::AbstractString, model_type::AbstractString)
+    if isdir(path)
+        # Directory: load all matching files
+        if model_type == "pwm"
+            files = filter(f -> endswith(lowercase(f), ".meme"), readdir(path; join=true))
+        elseif model_type == "bamm"
+            files = filter(f -> endswith(lowercase(f), ".ihbcp"), readdir(path; join=true))
+        elseif model_type == "sitega"
+            files = filter(f -> endswith(lowercase(f), ".mat"), readdir(path; join=true))
+        elseif model_type in ("dimont", "slim")
+            files = filter(f -> endswith(lowercase(f), ".xml"), readdir(path; join=true))
+        else
+            throw(CLIError("unsupported model type for directory: $(model_type)"))
+        end
+        isempty(files) && throw(CLIError("no $(model_type) files found in $(path)."))
+        models = AbstractProfileSource[]
+        for f in files
+            push!(models, _read_typed_model(f, model_type))
+        end
+        return models
+    else
+        # Single file: MEME can contain multiple motifs
+        if model_type == "pwm"
+            # Read all motifs from MEME
+            models = AbstractProfileSource[]
+            idx = 0
+            while true
+                try
+                    pfm = read_meme(path; index=idx)
+                    pwm = pwm_from_pfm(pfm.frequencies; background=0.25f0, name=pfm.name)
+                    push!(models, pwm)
+                    idx += 1
+                catch e
+                    if e isa ModelFormatError && occursin("out of range", e.message)
+                        break
+                    end
+                    rethrow()
+                end
+            end
+            isempty(models) && throw(CLIError("no motifs found in $(path)."))
+            return models
+        else
+            return AbstractProfileSource[_read_typed_model(path, model_type)]
+        end
+    end
+end
+
+function _run_build_null(parsed::CLIParsed)
+    if length(parsed.positional) != 1
+        _print_build_null_help(stderr)
+        throw(CLIError("build-null requires a motif collection path."))
+    end
+    motifs_path = parsed.positional[1]
+
+    haskey(parsed.options, "model-type") || throw(CLIError("--model-type is required."))
+    haskey(parsed.options, "groups") || throw(CLIError("--groups is required."))
+    haskey(parsed.options, "output") || throw(CLIError("--output is required."))
+
+    model_type = parsed.options["model-type"]
+    model_type in MODEL_TYPES ||
+        throw(CLIError("--model-type must be one of: $(join(MODEL_TYPES, ", "))"))
+
+    groups_path = parsed.options["groups"]
+    output_path = parsed.options["output"]
+    name_col = get(parsed.options, "name-column", "motif")
+    group_col = get(parsed.options, "group-column", "group")
+    ignore_missing = "ignore-missing" in parsed.flags
+    strict = "strict" in parsed.flags
+    min_null = tryparse(Int, get(parsed.options, "min-null-targets", "1"))
+    seed = tryparse(Int, get(parsed.options, "seed", "127"))
+    num_seq = tryparse(Int, get(parsed.options, "num-sequences", "1000"))
+    seq_len = tryparse(Int, get(parsed.options, "seq-length", "200"))
+    fasta = get(parsed.options, "fasta", nothing)
+
+    metric = get(parsed.options, "metric", "co")
+    metric in PROFILE_METRICS ||
+        throw(CLIError("--metric must be one of: $(join(PROFILE_METRICS, ", "))"))
+
+    # Read models
+    models = _read_model_collection(motifs_path, model_type)
+    known_names = Set(modelname(m) for m in models)
+    relations = parse_group_relations(
+        groups_path;
+        name_column=name_col,
+        group_column=group_col,
+        ignore_missing=ignore_missing,
+        known_names=known_names,
+    )
+
+    min_null === nothing &&
+        throw(CLIError("--min-null-targets must be a positive integer."))
+    min_null > 0 || throw(CLIError("--min-null-targets must be a positive integer."))
+    seed === nothing && throw(CLIError("--seed must be an integer."))
+    num_seq === nothing && throw(CLIError("--num-sequences must be a positive integer."))
+    num_seq > 0 || throw(CLIError("--num-sequences must be a positive integer."))
+    seq_len === nothing && throw(CLIError("--seq-length must be a positive integer."))
+    seq_len > 0 || throw(CLIError("--seq-length must be a positive integer."))
+
+    search_range = tryparse(Int, get(parsed.options, "search-range", "10"))
+    window_radius = tryparse(Int, get(parsed.options, "window-radius", "10"))
+    realign_window = tryparse(Int, get(parsed.options, "realign-window", "3"))
+    min_logfpr = tryparse(Float32, get(parsed.options, "min-logfpr", "0.0"))
+    search_range === nothing &&
+        throw(CLIError("--search-range must be a non-negative integer."))
+    window_radius === nothing &&
+        throw(CLIError("--window-radius must be a non-negative integer."))
+    realign_window === nothing &&
+        throw(CLIError("--realign-window must be a non-negative integer."))
+    min_logfpr === nothing && throw(CLIError("--min-logfpr must be a finite number."))
+    search_range >= 0 || throw(CLIError("--search-range must be a non-negative integer."))
+    window_radius >= 0 || throw(CLIError("--window-radius must be a non-negative integer."))
+    realign_window >= 0 ||
+        throw(CLIError("--realign-window must be a non-negative integer."))
+    isfinite(min_logfpr) || throw(CLIError("--min-logfpr must be a finite number."))
+
+    exec_policy = _execution_policy(parsed)
+
+    sequences = if isnothing(fasta)
+        make_random_sequences(num_seq, seq_len; seed=seed)
+    else
+        first(readsequences(fasta))
+    end
+    result = build_null(
+        models,
+        relations;
+        metric=metric,
+        min_null_targets=min_null,
+        strict=strict,
+        execution=exec_policy,
+        sequences=sequences,
+        search_range=search_range,
+        window_radius=window_radius,
+        realign_window=realign_window,
+        min_logfpr=min_logfpr,
+    )
+
+    # Save null distribution
+    savenull(output_path, result.distribution)
+
+    # Output summary
+    summary = Dict{String,Any}(
+        "output" => output_path,
+        "n_models" => length(models),
+        "n_comparisons" => result.total_comparisons,
+        "n_null" => result.distribution.n_null,
+        "n_queries" => result.distribution.n_queries,
+        "metric" => result.distribution.metric,
+        "strategy" => result.distribution.strategy,
+    )
+    if result.distribution.fit isa GEVFit
+        summary["gev_shape"] = result.distribution.fit.shape
+        summary["gev_location"] = result.distribution.fit.location
+        summary["gev_scale"] = result.distribution.fit.scale
+        summary["gev_converged"] = result.distribution.fit.converged
+    end
+    if "verbose" in parsed.flags
+        println(
+            stderr,
+            "build-null: strategy=$(result.distribution.strategy), metric=$(result.distribution.metric), comparisons=$(result.total_comparisons)",
+        )
+    end
+    "quiet" in parsed.flags || _println_json(summary)
+    return 0
+end
+
+# ── Command: cache clear ────────────────────────────────────────────────────
+
+function _print_cache_help(io::IO)
+    println(io, "Usage: mimosa cache clear [--cache-dir <dir>] [options]")
+    println(io, "")
+    println(io, "Remove all cached profile artifacts from the specified directory.")
+    println(io, "")
+    println(io, "Options:")
+    println(io, "  --cache-dir <dir>    Cache directory (default: .mimosa-cache)")
+    println(io, "  --quiet             Suppress informational output")
+    println(io, "  --verbose           Verbose diagnostics to stderr")
+    return nothing
+end
+
+function _run_cache(parsed::CLIParsed)
+    if length(parsed.positional) != 1 || parsed.positional[1] != "clear"
+        _print_cache_help(stderr)
+        throw(CLIError("cache requires a subcommand: clear"))
+    end
+
+    cache_dir = get(parsed.options, "cache-dir", ".mimosa-cache")
+    root = abspath(cache_dir)
+    (root == dirname(root) || root == homedir()) &&
+        throw(CLIError("--cache-dir points to a dangerously broad directory."))
+    ispath(root) &&
+        (!isdir(root) || islink(root)) &&
+        throw(CLIError("--cache-dir must be a real directory, not a file or symlink."))
+    cache = Cache(cache_dir)
+    removed = clearcache(cache)
+    "quiet" in parsed.flags ||
+        _println_json(Dict{String,Any}("cache_dir" => cache_dir, "removed" => removed))
+    return 0
+end
+
+# ── Command: inspect-model ───────────────────────────────────────────────────
+
+function _print_inspect_help(io::IO)
+    println(io, "Usage: mimosa inspect-model <path> [options]")
+    println(io, "")
+    println(io, "Display model metadata, type, dimensions, and score bounds.")
+    println(io, "")
+    println(io, "Options:")
+    println(
+        io,
+        "  --type <type>    Model type: $(join(PROFILE_MODEL_TYPES, ", ")) (default: auto-detect)",
+    )
+    println(io, "  --index <n>      MEME motif index (default: 0)")
+    println(io, "  --background <f>  Background frequency for PWM (default: 0.25)")
+    return nothing
+end
+
+function _model_info(model::AbstractProfileSource)
+    info = Dict{String,Any}("name" => modelname(model), "type" => _model_kind(model))
+    if model isa PWM
+        info["width"] = length(model)
+        info["rows"] = size(model.weights, 1)
+        info["background"] = collect(model.background)
+    elseif model isa BaMM
+        info["order"] = model.order
+        info["motif_length"] = model.motif_length
+        info["rows"] = size(model.representation, 1)
+    elseif model isa SiteGA
+        info["motif_length"] = model.motif_length
+        info["rows"] = size(model.representation, 1)
+    elseif model isa Dimont
+        info["span"] = model.span
+        info["motif_length"] = model.motif_length
+        info["rows"] = size(model.representation, 1)
+    elseif model isa Slim
+        info["span"] = model.span
+        info["motif_length"] = model.motif_length
+        info["rows"] = size(model.representation, 1)
+    elseif model isa ScoreProfile
+        info["n_sequences"] = nrows(model.scores)
+    end
+
+    lo, hi = scorebounds(model)
+    info["score_min"] = Float64(lo)
+    info["score_max"] = Float64(hi)
+    return info
+end
+
+function _run_inspect_model(parsed::CLIParsed)
+    if isempty(parsed.positional)
+        _print_inspect_help(stderr)
+        throw(CLIError("inspect-model requires a model file path."))
+    end
+    path = parsed.positional[1]
+    model_type = get(parsed.options, "type", nothing)
+    idx = tryparse(Int, get(parsed.options, "index", "0"))
+    bg = tryparse(Float32, get(parsed.options, "background", "0.25"))
+
+    if model_type !== nothing
+        model = _read_typed_model(path, model_type; index=idx, background=bg)
+    else
+        model = readmodel(path; index=idx, background=bg)
+    end
+
+    info = _model_info(model)
+    _println_json(info)
+    return 0
+end
+
+# ── Command: convert-model ───────────────────────────────────────────────────
+
+function _print_convert_help(io::IO)
+    println(io, "Usage: mimosa convert-model <input> <output> [options]")
+    println(io, "")
+    println(io, "Convert a legacy model file to the portable Mimosa bundle format.")
+    println(io, "")
+    println(io, "Options:")
+    println(io, "  --type <type>      Model type (default: auto-detect)")
+    println(io, "  --index <n>        MEME motif index (default: 0)")
+    println(io, "  --background <f>   Background frequency for PWM (default: 0.25)")
+    return nothing
+end
+
+function _run_convert_model(parsed::CLIParsed)
+    if length(parsed.positional) < 2
+        _print_convert_help(stderr)
+        throw(CLIError("convert-model requires input and output paths."))
+    end
+    input_path = parsed.positional[1]
+    output_path = parsed.positional[2]
+    model_type = get(parsed.options, "type", nothing)
+    idx = tryparse(Int, get(parsed.options, "index", "0"))
+    bg = tryparse(Float32, get(parsed.options, "background", "0.25"))
+
+    if model_type !== nothing
+        model = _read_typed_model(input_path, model_type; index=idx, background=bg)
+    else
+        model = readmodel(input_path; index=idx, background=bg)
+    end
+
+    writemodel(output_path, model)
+    _println_json(
+        Dict{String,Any}(
+            "input" => input_path,
+            "output" => output_path,
+            "type" => _model_kind(model),
+            "name" => modelname(model),
+        ),
+    )
+    return 0
+end
+
+# ── Main entry point ─────────────────────────────────────────────────────────
+#
+# The main() function is the orchestration layer: it dispatches to the
+# appropriate command runner based on the command name. Option specs are
+# looked up from COMMAND_SPECS (defined above). The parser (_parse_command_args)
+# does not perform scientific validation; the runner (_run_*) validates and
+# calls the public API.
+
+"""
+    main(args=ARGS)
+
+CLI entry point. Returns an integer exit code (0 on success, 1 on usage error,
+2 on runtime error). Prints JSON to stdout on success, diagnostics to stderr.
+"""
+function main(args::Vector{String}=ARGS)::Int
+    try
+        parsed = _parse_cli(args)
+        parsed === nothing && return 0  # --help or --version
+        command, cmd_args = parsed
+
+        spec = get(COMMAND_SPECS, command, nothing)
+        if spec === nothing
+            if command in ("--help", "-h")
+                _print_global_help(stdout)
+                return 0
+            elseif command in ("--version", "-V")
+                println(stdout, "mimosa $(CLI_VERSION)")
+                return 0
+            else
+                _print_global_help(stderr)
+                throw(CLIError("unknown command: $(command)"))
+            end
+        end
+
+        cp = _parse_command_args(command, cmd_args, nothing, spec.options, spec.flags)
+        cp === :help && return _dispatch_help(command)
+        return _dispatch_runner(command, cp)
+    catch e
+        if e isa CLIError
+            println(stderr, "error: $(e.message)")
+            return 1
+        else
+            println(stderr, "error: $(typeof(e).name.name): $(e)")
+            return 2
+        end
+    end
+end
+
+function _dispatch_help(command::AbstractString)
+    if command == "profile"
+        _print_profile_help(stdout)
+    elseif command == "build-null"
+        _print_build_null_help(stdout)
+    elseif command == "cache"
+        _print_cache_help(stdout)
+    elseif command == "inspect-model"
+        _print_inspect_help(stdout)
+    elseif command == "convert-model"
+        _print_convert_help(stdout)
+    end
+    return 0
+end
+
+function _dispatch_runner(command::AbstractString, parsed::CLIParsed)
+    if command == "profile"
+        return _run_profile(parsed)
+    elseif command == "build-null"
+        return _run_build_null(parsed)
+    elseif command == "cache"
+        return _run_cache(parsed)
+    elseif command == "inspect-model"
+        return _run_inspect_model(parsed)
+    elseif command == "convert-model"
+        return _run_convert_model(parsed)
+    else
+        throw(CLIError("unknown command: $(command)"))
+    end
+end

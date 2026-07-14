@@ -1,0 +1,15 @@
+{
+  "_schema": "Mimosa.jl benchmark baseline — see benchmark/README.md for instructions",
+  "_description": "Store per-benchmark median timing to detect regressions. Update only on controlled machines. Per E2, comparisons do NOT block PRs — only confirmed regressions on representative workloads block RC.",
+  "_how_to_update": "Run: julia --project=Mimosa.jl/benchmark Mimosa.jl/benchmark/runbenchmarks.jl --output Mimosa.jl/benchmark/baseline.json",
+  "_format_version": 1,
+  "environment": {
+    "commit_sha": "unknown",
+    "julia_version": "unknown",
+    "machine": "unknown",
+    "cpu_model": "unknown",
+    "n_threads": 0,
+    "timestamp": "unknown"
+  },
+  "results": []
+}

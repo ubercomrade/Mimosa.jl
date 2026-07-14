@@ -1,0 +1,7 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+Mimosa = "2e41fa5d-e7f2-4070-8a6b-25ce77bfeb85"
+
+[compat]
+Documenter = "1"
+julia = "1.10"
