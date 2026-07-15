@@ -8,7 +8,7 @@
 using Test
 using Mimosa
 
-const EXAMPLES = joinpath(dirname(dirname(@__DIR__)), "..", "examples")
+const EXAMPLES = joinpath(dirname(dirname(@__DIR__)), "examples")
 
 # ── Geometry formula pinning ──────────────────────────────────────────────
 #

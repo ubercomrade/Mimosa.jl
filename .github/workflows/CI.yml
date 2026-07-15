@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v2
+      - name: Run package tests
+        uses: julia-actions/julia-runtest@v1
+      - name: Test Pkg app installation
+        shell: bash
+        env:
+          JULIA_DEPOT_PATH: ${{ runner.temp }}/mimosa-app-depot
+          JULIA_PKG_PRECOMPILE_AUTO: '0'
+        run: |
+          julia --startup-file=no -e 'using Pkg; Pkg.Apps.develop(path=pwd())'
+          julia --startup-file=no -e 'app = joinpath(first(DEPOT_PATH), "bin", Sys.iswindows() ? "mimosa.bat" : "mimosa"); Sys.iswindows() ? run(`cmd /c $app -- --version`) : run(`$app -- --version`)'
+
+  quality:
+    name: Quality and downstream contract
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v2
+      - name: Instantiate test environment
+        run: julia --project=test -e 'using Pkg; Pkg.instantiate()'
+      - name: Check formatting
+        run: >-
+          julia --project=test -e
+          'using JuliaFormatter;
+          @assert format("src"; overwrite=false);
+          @assert format("test"; overwrite=false);
+          @assert format("build"; overwrite=false)'
+      - name: Test downstream API contract
+        run: julia --project=test/downstream test/downstream/runtests.jl
+      - name: Build documentation
+        run: julia --project=docs -e 'using Pkg; Pkg.instantiate(); include("docs/make.jl")'

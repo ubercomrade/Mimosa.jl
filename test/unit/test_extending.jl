@@ -456,7 +456,7 @@ end
 
 @testset "Extension: custom/built-in comparison in both orders" begin
     custom = ConsensusModel("custom", _encode("ACGT"))
-    pwm = readmodel(joinpath(dirname(dirname(@__DIR__)), "..", "examples", "pif4.meme"))
+    pwm = readmodel(joinpath(dirname(dirname(@__DIR__)), "examples", "pif4.meme"))
     sequences = Mimosa.make_random_sequences(8, 80; seed=11)
 
     r1 = compare(custom, pwm, sequences; metric=:co, search_range=4, window_radius=2)

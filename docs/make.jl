@@ -33,4 +33,4 @@ makedocs(;
     ],
 )
 
-deploydocs(; repo="github.com/mimosa-jl/Mimosa.jl.git", devbranch="main", push_preview=true)
+deploydocs(; repo="github.com/ubercomrade/Mimosa.jl.git", devbranch="main", push_preview=true)

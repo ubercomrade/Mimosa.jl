@@ -18,7 +18,7 @@ using Test
 using Mimosa
 
 # Path to example data files (repo-level, not test internals)
-const REPO_ROOT = dirname(dirname(dirname(@__DIR__)))
+const REPO_ROOT = dirname(dirname(@__DIR__))
 const EXAMPLES = joinpath(REPO_ROOT, "examples")
 
 # ---------------------------------------------------------------------------
@@ -554,7 +554,7 @@ function run()
 
     @testset "custom vs built-in PWM" begin
         custom = MatchCounter("custom", Mimosa.encode_sequence("ACGT"))
-        examples = joinpath(dirname(dirname(dirname(@__DIR__))), "examples")
+        examples = joinpath(dirname(dirname(@__DIR__)), "examples")
         pwm = readmodel(joinpath(examples, "pif4.meme"))
         sequences = Mimosa.make_random_sequences(6, 60; seed=33)
 

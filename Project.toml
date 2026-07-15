@@ -1,11 +1,14 @@
 name = "Mimosa"
 uuid = "2e41fa5d-e7f2-4070-8a6b-25ce77bfeb85"
+keywords = ["motif", "bioinformatics", "PWM", "BaMM", "Julia"]
+license = "MIT"
 version = "0.1.0"
 authors = ["Mimosa contributors"]
-repo = "https://github.com/mimosa-jl/Mimosa.jl.git"
-license = "MIT"
-keywords = ["motif", "bioinformatics", "PWM", "BaMM", "Julia"]
 description = "Motif scanning, comparison, and statistical evaluation in Julia"
+repo = "https://github.com/ubercomrade/Mimosa.jl.git"
+
+[apps]
+mimosa = { submodule = "CLIApp" }
 
 [deps]
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
@@ -20,4 +23,4 @@ Printf = "1.10"
 Random = "1.10"
 SHA = "0.7"
 TOML = "1.0"
-julia = "1.10"
+julia = "1.12"

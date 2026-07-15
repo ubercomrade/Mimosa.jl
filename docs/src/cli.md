@@ -3,7 +3,26 @@
 The CLI is a thin adapter over the public API. Successful results are JSON on
 stdout; diagnostics and errors go to stderr.
 
-Run commands from the repository root:
+## Installation
+
+With Julia 1.12 or newer, install the executable through the experimental Pkg
+Apps interface:
+
+```julia
+using Pkg
+Pkg.Apps.add(url="https://github.com/ubercomrade/Mimosa.jl.git")
+```
+
+After registration in General, `Pkg.Apps.add("Mimosa")` is sufficient. Ensure
+that `~/.julia/bin` is on `PATH`. Examples include `mimosa -- --help` and
+`mimosa profile ...`; the separator is needed when the first application
+argument begins with `-`.
+
+Standalone archives attached to GitHub Releases include Julia and do not
+require a Julia installation. Extract the entire archive and invoke
+`Mimosa/bin/mimosa` (`Mimosa/bin/mimosa.exe` on Windows).
+
+For development, run commands from the repository root:
 
 ```bash
 julia --project=. app/mimosa.jl <command> [options]

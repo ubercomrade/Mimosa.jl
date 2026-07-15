@@ -1,7 +1,7 @@
 using Test
 using Mimosa
 
-const REPO_ROOT = joinpath(dirname(dirname(@__DIR__)), "..")
+const REPO_ROOT = dirname(dirname(@__DIR__))
 const EXAMPLES = joinpath(REPO_ROOT, "examples")
 
 @testset "reverse_complement involution (PWM)" begin

@@ -1,6 +1,6 @@
 # Mimosa.jl
 
-Mimosa.jl is a Julia 1.10+ package for DNA motif scanning, profile-based
+Mimosa.jl is a Julia 1.12+ package for DNA motif scanning, profile-based
 comparison, site extraction, PFM reconstruction, and statistical evaluation.
 
 It supports PWM models read from MEME or PFM input, BaMM, SiteGA, Dimont,

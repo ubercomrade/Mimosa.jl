@@ -5,7 +5,7 @@ using Test
 using Mimosa
 using Random
 
-const REPO_ROOT = joinpath(dirname(dirname(@__DIR__)), "..")
+const REPO_ROOT = dirname(dirname(@__DIR__))
 const EXAMPLES = joinpath(REPO_ROOT, "examples")
 
 # ── B2: EncodedSequenceBatch code validation ──────────────────────────────

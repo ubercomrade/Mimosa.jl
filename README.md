@@ -1,6 +1,6 @@
 # Mimosa.jl
 
-Mimosa.jl is a Julia 1.10+ package and command-line tool for DNA motif comparison. It supports PWM/PFM, BaMM, SiteGA, Dimont, Slim, and precomputed score profiles. Mimosa compares heterogeneous motif models through their behavior on the same DNA sequences rather than by forcing their internal representations into a common matrix.
+Mimosa.jl is a Julia 1.12+ package and command-line tool for DNA motif comparison. It supports PWM/PFM, BaMM, SiteGA, Dimont, Slim, and precomputed score profiles. Mimosa compares heterogeneous motif models through their behavior on the same DNA sequences rather than by forcing their internal representations into a common matrix.
 
 ## Background
 
@@ -41,21 +41,31 @@ See [Supported Models](docs/src/models.md) for format and scanning details.
 
 ## Installation
 
-Mimosa.jl requires Julia 1.10 or newer and is not currently registered in the
-General registry:
+Mimosa.jl requires Julia 1.12 or newer. Until the package is registered in the
+General registry, install the API directly from the repository:
 
-```bash
-git clone https://github.com/ubercomrade/Mimosa.jl.git
-cd Mimosa.jl
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
+```julia
+using Pkg
+Pkg.add(url="https://github.com/ubercomrade/Mimosa.jl.git")
 ```
 
-To use the package from another Julia environment, run
-`Pkg.develop(path="/path/to/Mimosa.jl")`.
+After registration, use `Pkg.add("Mimosa")`. Developers can use
+`Pkg.develop(path="/path/to/Mimosa.jl")` for a local checkout.
 
 ## CLI
 
-Run the CLI from the repository root:
+Install the Julia-backed executable with the experimental Pkg Apps interface:
+
+```julia
+using Pkg
+Pkg.Apps.add(url="https://github.com/ubercomrade/Mimosa.jl.git")
+```
+
+Add `~/.julia/bin` to `PATH`, then run `mimosa profile ...`. Use `--` before
+application arguments when the first application argument starts with a dash,
+for example `mimosa -- --help`.
+
+The CLI can also be run directly from a repository checkout:
 
 ```bash
 julia --project=. app/mimosa.jl \
@@ -67,6 +77,13 @@ julia --project=. app/mimosa.jl \
 Successful commands write JSON to `stdout`; diagnostics go to `stderr`. See the
 [CLI guide](docs/src/cli.md) for all commands, options, threading, null
 distributions, and exit codes.
+
+Standalone archives for Linux, Windows, and macOS are attached to tagged GitHub
+Releases. They include the Julia runtime and do not require Julia to be
+installed.
+
+Maintainers must configure the `TAGBOT_SSH_KEY` repository secret before
+automating registered releases; see the [release guide](docs/src/release.md).
 
 ## Julia API
 

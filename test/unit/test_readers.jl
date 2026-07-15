@@ -6,9 +6,9 @@ using Mimosa
     @test !(:read_pfm in names(Mimosa))
 end
 
-const REPO_ROOT = joinpath(dirname(dirname(@__DIR__)), "..")
+const REPO_ROOT = dirname(dirname(@__DIR__))
 const EXAMPLES = joinpath(REPO_ROOT, "examples")
-const TEST_FIXTURES = joinpath(REPO_ROOT, "tests", "fixtures")
+const TEST_FIXTURES = joinpath(REPO_ROOT, "test", "fixtures")
 
 @testset "read_meme parses pif4.meme" begin
     pfm = Mimosa.read_meme(joinpath(EXAMPLES, "pif4.meme"); index=0)

@@ -2,16 +2,16 @@
 
 ## Installation
 
-Mimosa.jl requires Julia 1.10 or newer and is not currently registered in
-General. Install it from a local clone, or develop the clone from another Julia
-environment:
+Mimosa.jl requires Julia 1.12 or newer. Until it is registered in General,
+install it from its repository:
 
 ```julia
 using Pkg
-Pkg.develop(path="/path/to/Mimosa.jl")
+Pkg.add(url="https://github.com/ubercomrade/Mimosa.jl.git")
 ```
 
-The examples below assume the repository root is the working directory.
+After registration, use `Pkg.add("Mimosa")`. The examples below assume the
+repository root is the working directory.
 
 ## Read and Scan a Model
 

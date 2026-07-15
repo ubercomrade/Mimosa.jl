@@ -175,5 +175,12 @@ Makefile
 !CMakeLists.txt
 
 ################################################################################
+# PackageCompiler's reproducible build environment and scripts are source files.
+!/build/
+/build/*
+!/build/Project.toml
+!/build/Manifest.toml
+!/build/*.jl
+
 # End of .gitignore
 ################################################################################

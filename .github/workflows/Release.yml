@@ -1,0 +1,125 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Release validation
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v2
+      - name: Check tag version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          project_version="$(julia --project=. -e 'using TOML; print(TOML.parsefile("Project.toml")["version"])')"
+          test "v${project_version}" = "${GITHUB_REF_NAME}"
+      - name: Run package tests
+        uses: julia-actions/julia-runtest@v1
+      - name: Check formatting
+        run: >-
+          julia --project=test -e
+          'using Pkg; Pkg.instantiate();
+          using JuliaFormatter;
+          @assert format("src"; overwrite=false);
+          @assert format("test"; overwrite=false);
+          @assert format("build"; overwrite=false)'
+      - name: Test downstream API contract
+        run: julia --project=test/downstream test/downstream/runtests.jl
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: linux-x86_64
+            extension: tar.gz
+          - runner: ubuntu-22.04-arm
+            target: linux-aarch64
+            extension: tar.gz
+          - runner: windows-2022
+            target: windows-x86_64
+            extension: zip
+          - runner: macos-15-intel
+            target: macos-x86_64
+            extension: tar.gz
+          - runner: macos-15
+            target: macos-aarch64
+            extension: tar.gz
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v2
+      - name: Instantiate application source
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+      - name: Instantiate compiler environment
+        run: julia --project=build -e 'using Pkg; Pkg.instantiate()'
+      - name: Compile standalone application
+        run: julia --project=build build/build_app.jl
+      - name: Smoke-test compiled application
+        run: julia --project=build build/smoke_app.jl dist/Mimosa
+      - name: Read package version
+        id: version
+        shell: bash
+        run: echo "value=$(julia --project=. -e 'using TOML; print(TOML.parsefile("Project.toml")["version"])')" >> "$GITHUB_OUTPUT"
+      - name: Create Unix archive
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          tar -C dist -czf "release-assets/mimosa-v${{ steps.version.outputs.value }}-${{ matrix.target }}.${{ matrix.extension }}" Mimosa
+      - name: Create Windows archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Compress-Archive -Path dist/Mimosa -DestinationPath "release-assets/mimosa-v${{ steps.version.outputs.value }}-${{ matrix.target }}.${{ matrix.extension }}"
+      - name: Upload compiled application
+        uses: actions/upload-artifact@v4
+        with:
+          name: mimosa-${{ matrix.target }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mimosa-*
+          path: release-assets
+          merge-multiple: true
+      - name: Create checksums
+        working-directory: release-assets
+        run: sha256sum mimosa-* > SHA256SUMS
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release-assets/* --verify-tag --generate-notes
+          fi

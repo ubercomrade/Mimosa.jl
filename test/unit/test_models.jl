@@ -1,7 +1,7 @@
 using Test
 using Mimosa
 
-const EXAMPLES = joinpath(dirname(dirname(@__DIR__)), "..", "examples")
+const EXAMPLES = joinpath(dirname(dirname(@__DIR__)), "examples")
 
 @testset "PWM construction from frequency matrices" begin
     frequencies = Float32[0.25 0.5; 0.25 0.25; 0.25 0.1; 0.25 0.15]
