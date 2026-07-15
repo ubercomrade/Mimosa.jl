@@ -20,11 +20,10 @@ the `"motif"` null strategy were deliberately removed.
 
 ## Legacy Serialized Data
 
-Mimosa.jl never reads pickle/joblib. Historical conversion helpers remain under
-`scripts/` and must be used only with explicitly trusted input because
-Python deserialization can execute arbitrary code. Convert outside the Julia
-trust boundary, then validate the resulting portable bundle with `readmodel` or
-`loadnull`.
+Mimosa.jl never reads pickle/joblib and no Python conversion helpers are bundled.
+Because Python deserialization can execute arbitrary code, convert legacy data
+outside the Julia trust boundary, then validate the resulting portable bundle
+with `readmodel` or `loadnull`.
 
 Null bundles from the removed strategy or versions older than 2 are not accepted
 by the current reader and must not be relabeled without recomputing a compatible

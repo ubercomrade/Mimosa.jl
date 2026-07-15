@@ -47,15 +47,10 @@ end
 ## Legacy format handling
 
 Legacy Python `pickle`/`joblib` files may contain arbitrary Python objects.
-Mimosa.jl **never** reads these files directly. Conversion is done via
-separate Python scripts with an explicit `--trusted-input` flag:
-
-```bash
-python scripts/convert_legacy_model.py --trusted-input old_model.pkl --output new_bundle
-```
-
-The `--trusted-input` flag must be provided explicitly, serving as a security
-guard against accidental deserialization of untrusted data.
+Mimosa.jl **never** reads these files directly and does not include Python
+conversion scripts. Any necessary conversion must happen outside the Mimosa.jl
+trust boundary in an isolated environment before the result is validated with
+the Julia readers.
 
 ## XML safety
 

@@ -74,23 +74,6 @@ julia --project=. app/mimosa.jl \
   cache clear --cache-dir .mimosa-cache
 ```
 
-### `inspect-model`
-
-```bash
-julia --project=. app/mimosa.jl \
-  inspect-model examples/foxa2.ihbcp --type bamm
-```
-
-### `convert-model`
-
-```bash
-julia --project=. app/mimosa.jl \
-  convert-model examples/pif4.meme output/pif4_bundle --type pwm
-```
-
-This converts a supported scientific model file into a portable Mimosa model
-bundle. It does not deserialize pickle/joblib data.
-
 ## Threading
 
 `--threads=N` selects `ThreadedExecution(N)` but cannot create Julia runtime

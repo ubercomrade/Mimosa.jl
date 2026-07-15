@@ -54,26 +54,6 @@ end
     @test code == 0
 end
 
-@testset "CLI subprocess: inspect-model" begin
-    path = joinpath(EXAMPLES, "pif4.meme")
-    code = _run_exitcode(
-        `$(Base.julia_cmd()) --project=$(REPO_ROOT) $(MIMOSA_APP) inspect-model $(path)`
-    )
-    @test code == 0
-end
-
-@testset "CLI subprocess: convert-model" begin
-    path = joinpath(EXAMPLES, "pif4.meme")
-    dir = mktempdir()
-    output = joinpath(dir, "pif4_bundle")
-    code = _run_exitcode(
-        `$(Base.julia_cmd()) --project=$(REPO_ROOT) $(MIMOSA_APP) convert-model $(path) $(output)`,
-    )
-    @test code == 0
-    @test isdir(output)
-    @test isfile(joinpath(output, "manifest.toml"))
-end
-
 @testset "CLI subprocess: cache clear" begin
     dir = mktempdir()
     cache_dir = joinpath(dir, "mimosa-cache")

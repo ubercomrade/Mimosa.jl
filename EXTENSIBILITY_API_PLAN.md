@@ -371,16 +371,6 @@ Fingerprint требуется только при создании артефа
 Не расширять типы сохраненного null bundle пользовательскими Julia type names.
 Схема null version 2 остается profile-only.
 
-### 7.4. CLI inspect и convert
-
-Library-level custom model не обязан работать в стандартном CLI. Для модели,
-которую загрузил внешний adapter, inspect должен использовать `modelname`,
-геометрию и опциональный `scorebounds`, а не поля встроенных structs.
-
-`convert-model` остается доступным только codecs, поддерживающим запись.
-Отсутствие writer должно давать стабильную диагностическую ошибку, а не
-`MethodError`.
-
 ## 8. Отделение файловых форматов от моделей
 
 ### 8.1. Typed format dispatch

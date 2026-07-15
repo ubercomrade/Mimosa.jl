@@ -68,16 +68,6 @@ const BUILD_NULL_FLAGS = Set(["ignore-missing", "strict", "quiet", "verbose"])
 const CACHE_OPTIONS = Dict{String,Bool}("cache-dir" => true, "threads" => true)
 const CACHE_FLAGS = Set(["quiet", "verbose"])
 
-const INSPECT_OPTIONS = Dict{String,Bool}(
-    "type" => true, "index" => true, "background" => true
-)
-const INSPECT_FLAGS = Set(["quiet", "verbose"])
-
-const CONVERT_OPTIONS = Dict{String,Bool}(
-    "type" => true, "index" => true, "background" => true
-)
-const CONVERT_FLAGS = Set(["quiet", "verbose"])
-
 # Map command name to (option_spec, flag_spec) for dispatch.
 const COMMAND_SPECS = Dict{
     String,NamedTuple{(:options, :flags),Tuple{Dict{String,Bool},Set{String}}}
@@ -85,8 +75,6 @@ const COMMAND_SPECS = Dict{
     "profile" => (options=PROFILE_OPTIONS, flags=PROFILE_FLAGS),
     "build-null" => (options=BUILD_NULL_OPTIONS, flags=BUILD_NULL_FLAGS),
     "cache" => (options=CACHE_OPTIONS, flags=CACHE_FLAGS),
-    "inspect-model" => (options=INSPECT_OPTIONS, flags=INSPECT_FLAGS),
-    "convert-model" => (options=CONVERT_OPTIONS, flags=CONVERT_FLAGS),
 )
 
 # ── CLI argument parsing ────────────────────────────────────────────────────
@@ -137,8 +125,6 @@ function _print_global_help(io::IO)
         io, "  build-null    Build a null distribution from unrelated motif comparisons"
     )
     println(io, "  cache         Manage disk cache (clear)")
-    println(io, "  inspect-model Display model metadata and dimensions")
-    println(io, "  convert-model Convert a legacy model file to portable Mimosa format")
     println(io, "")
     println(io, "Global options:")
     println(io, "  --help, -h    Show this help message")
@@ -803,118 +789,6 @@ function _run_cache(parsed::CLIParsed)
     return 0
 end
 
-# ── Command: inspect-model ───────────────────────────────────────────────────
-
-function _print_inspect_help(io::IO)
-    println(io, "Usage: mimosa inspect-model <path> [options]")
-    println(io, "")
-    println(io, "Display model metadata, type, dimensions, and score bounds.")
-    println(io, "")
-    println(io, "Options:")
-    println(
-        io,
-        "  --type <type>    Model type: $(join(PROFILE_MODEL_TYPES, ", ")) (default: auto-detect)",
-    )
-    println(io, "  --index <n>      MEME motif index (default: 0)")
-    println(io, "  --background <f>  Background frequency for PWM (default: 0.25)")
-    return nothing
-end
-
-function _model_info(model::AbstractProfileSource)
-    info = Dict{String,Any}("name" => modelname(model), "type" => _model_kind(model))
-    if model isa PWM
-        info["width"] = length(model)
-        info["rows"] = size(model.weights, 1)
-        info["background"] = collect(model.background)
-    elseif model isa BaMM
-        info["order"] = model.order
-        info["motif_length"] = model.motif_length
-        info["rows"] = size(model.representation, 1)
-    elseif model isa SiteGA
-        info["motif_length"] = model.motif_length
-        info["rows"] = size(model.representation, 1)
-    elseif model isa Dimont
-        info["span"] = model.span
-        info["motif_length"] = model.motif_length
-        info["rows"] = size(model.representation, 1)
-    elseif model isa Slim
-        info["span"] = model.span
-        info["motif_length"] = model.motif_length
-        info["rows"] = size(model.representation, 1)
-    elseif model isa ScoreProfile
-        info["n_sequences"] = nrows(model.scores)
-    end
-
-    lo, hi = scorebounds(model)
-    info["score_min"] = Float64(lo)
-    info["score_max"] = Float64(hi)
-    return info
-end
-
-function _run_inspect_model(parsed::CLIParsed)
-    if isempty(parsed.positional)
-        _print_inspect_help(stderr)
-        throw(CLIError("inspect-model requires a model file path."))
-    end
-    path = parsed.positional[1]
-    model_type = get(parsed.options, "type", nothing)
-    idx = tryparse(Int, get(parsed.options, "index", "0"))
-    bg = tryparse(Float32, get(parsed.options, "background", "0.25"))
-
-    if model_type !== nothing
-        model = _read_typed_model(path, model_type; index=idx, background=bg)
-    else
-        model = readmodel(path; index=idx, background=bg)
-    end
-
-    info = _model_info(model)
-    _println_json(info)
-    return 0
-end
-
-# ── Command: convert-model ───────────────────────────────────────────────────
-
-function _print_convert_help(io::IO)
-    println(io, "Usage: mimosa convert-model <input> <output> [options]")
-    println(io, "")
-    println(io, "Convert a legacy model file to the portable Mimosa bundle format.")
-    println(io, "")
-    println(io, "Options:")
-    println(io, "  --type <type>      Model type (default: auto-detect)")
-    println(io, "  --index <n>        MEME motif index (default: 0)")
-    println(io, "  --background <f>   Background frequency for PWM (default: 0.25)")
-    return nothing
-end
-
-function _run_convert_model(parsed::CLIParsed)
-    if length(parsed.positional) < 2
-        _print_convert_help(stderr)
-        throw(CLIError("convert-model requires input and output paths."))
-    end
-    input_path = parsed.positional[1]
-    output_path = parsed.positional[2]
-    model_type = get(parsed.options, "type", nothing)
-    idx = tryparse(Int, get(parsed.options, "index", "0"))
-    bg = tryparse(Float32, get(parsed.options, "background", "0.25"))
-
-    if model_type !== nothing
-        model = _read_typed_model(input_path, model_type; index=idx, background=bg)
-    else
-        model = readmodel(input_path; index=idx, background=bg)
-    end
-
-    writemodel(output_path, model)
-    _println_json(
-        Dict{String,Any}(
-            "input" => input_path,
-            "output" => output_path,
-            "type" => _model_kind(model),
-            "name" => modelname(model),
-        ),
-    )
-    return 0
-end
-
 # ── Main entry point ─────────────────────────────────────────────────────────
 #
 # The main() function is the orchestration layer: it dispatches to the
@@ -970,10 +844,6 @@ function _dispatch_help(command::AbstractString)
         _print_build_null_help(stdout)
     elseif command == "cache"
         _print_cache_help(stdout)
-    elseif command == "inspect-model"
-        _print_inspect_help(stdout)
-    elseif command == "convert-model"
-        _print_convert_help(stdout)
     end
     return 0
 end
@@ -985,10 +855,6 @@ function _dispatch_runner(command::AbstractString, parsed::CLIParsed)
         return _run_build_null(parsed)
     elseif command == "cache"
         return _run_cache(parsed)
-    elseif command == "inspect-model"
-        return _run_inspect_model(parsed)
-    elseif command == "convert-model"
-        return _run_convert_model(parsed)
     else
         throw(CLIError("unknown command: $(command)"))
     end

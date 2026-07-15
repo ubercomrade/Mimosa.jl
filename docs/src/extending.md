@@ -102,9 +102,8 @@ inner loops and worker tasks do not repeat it.
 
 ## Optional capabilities
 
-- `scorebounds(model)` is needed only by `inspect-model` and by formats
-  that export theoretical score bounds. Plain `compare` does not call
-  it.
+- `scorebounds(model)` is needed only by formats that export theoretical score
+  bounds. Plain `compare` does not call it.
 - `model_fingerprint(model)` is needed only by the cache and null
   bundle compatibility tracking. Plain `compare` does not call it. A
   custom model implements it as a stable SHA-256 hex string of all

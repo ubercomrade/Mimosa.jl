@@ -15,7 +15,7 @@
 | Parallelism | Bounded deterministic tasks | `SerialExecution`, `ThreadedExecution` |
 | Model storage | TOML/raw-binary format v2 | `writemodel`, `readmodel` |
 | Cache | Explicit format-v2 content cache | `Cache`, `cache_get`, `cache_set`, `clearcache` |
-| CLI | Five workflows | `profile`, `build-null`, `cache clear`, `inspect-model`, `convert-model` |
+| CLI | Three workflows | `profile`, `build-null`, `cache clear` |
 
 Direct matrix/tensor comparison, PCC/Euclidean motif metrics, the `motif` CLI
 command, and the `"motif"` null strategy are deliberately removed.

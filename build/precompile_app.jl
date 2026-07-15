@@ -4,7 +4,6 @@ const ROOT = normpath(joinpath(@__DIR__, ".."))
 const EXAMPLES = joinpath(ROOT, "examples")
 
 Mimosa.main(["--version"])
-Mimosa.main(["inspect-model", joinpath(EXAMPLES, "pif4.meme"), "--type", "pwm"])
 Mimosa.main([
     "profile",
     joinpath(EXAMPLES, "scores_1.fasta"),

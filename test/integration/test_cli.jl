@@ -19,8 +19,10 @@ end
     @test Mimosa.main(["bogus"]) == 1
 end
 
-@testset "CLI rejects removed motif command" begin
-    @test Mimosa.main(["motif", "--help"]) == 1
+@testset "CLI rejects removed commands" begin
+    for command in ("motif", "inspect-model", "convert-model")
+        @test Mimosa.main([command, "--help"]) == 1
+    end
 end
 
 @testset "CLI profile: score profile comparison" begin
@@ -117,70 +119,6 @@ end
         "42",
     ])
     @test code == 0
-end
-
-@testset "CLI inspect-model: PWM via MEME" begin
-    path = joinpath(EXAMPLES, "pif4.meme")
-    code = Mimosa.main(["inspect-model", path])
-    @test code == 0
-end
-
-@testset "CLI inspect-model: BaMM" begin
-    path = joinpath(EXAMPLES, "foxa2.ihbcp")
-    code = Mimosa.main(["inspect-model", path, "--type", "bamm"])
-    @test code == 0
-end
-
-@testset "CLI inspect-model: SiteGA" begin
-    path = joinpath(EXAMPLES, "sitega.mat")
-    code = Mimosa.main(["inspect-model", path, "--type", "sitega"])
-    @test code == 0
-end
-
-@testset "CLI inspect-model: help" begin
-    @test Mimosa.main(["inspect-model", "--help"]) == 0
-end
-
-@testset "CLI inspect-model: missing file" begin
-    code = Mimosa.main(["inspect-model", "/nonexistent.meme"])
-    @test code == 2
-end
-
-@testset "CLI convert-model: MEME to bundle" begin
-    path = joinpath(EXAMPLES, "pif4.meme")
-    dir = mktempdir()
-    output = joinpath(dir, "pif4_bundle")
-    code = Mimosa.main(["convert-model", path, output])
-    @test code == 0
-    @test isdir(output)
-    @test isfile(joinpath(output, "manifest.toml"))
-
-    # Verify round-trip
-    loaded = readmodel(output)
-    @test loaded isa PWM
-    @test loaded.name == "pwm_model"
-end
-
-@testset "CLI convert-model: BaMM to bundle" begin
-    path = joinpath(EXAMPLES, "foxa2.ihbcp")
-    dir = mktempdir()
-    output = joinpath(dir, "foxa2_bundle")
-    code = Mimosa.main(["convert-model", path, output, "--type", "bamm"])
-    @test code == 0
-    @test isdir(output)
-
-    loaded = readmodel(output)
-    @test loaded isa BaMM
-end
-
-@testset "CLI convert-model: help" begin
-    @test Mimosa.main(["convert-model", "--help"]) == 0
-end
-
-@testset "CLI convert-model: missing output" begin
-    path = joinpath(EXAMPLES, "pif4.meme")
-    code = Mimosa.main(["convert-model", path])
-    @test code == 1
 end
 
 @testset "CLI cache: clear empty cache" begin
