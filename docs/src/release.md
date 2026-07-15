@@ -15,14 +15,14 @@ clone with `Pkg.develop(path="/path/to/Mimosa.jl")`.
 From the repository root:
 
 ```bash
-julia --project=Mimosa.jl -e 'using Pkg; Pkg.test()'
+julia --project=. -e 'using Pkg; Pkg.test()'
 
-julia --project=Mimosa.jl/test -e \
-  'using JuliaFormatter; @assert format("Mimosa.jl/src"; overwrite=false); @assert format("Mimosa.jl/test"; overwrite=false)'
+julia --project=test -e \
+  'using JuliaFormatter; @assert format("src"; overwrite=false); @assert format("test"; overwrite=false)'
 
-julia --project=Mimosa.jl/docs Mimosa.jl/docs/make.jl
+julia --project=docs docs/make.jl
 
-julia --project=Mimosa.jl/test/downstream Mimosa.jl/test/downstream/runtests.jl
+julia --project=test/downstream test/downstream/runtests.jl
 ```
 
 Threaded validation must start Julia with multiple runtime threads and pass an

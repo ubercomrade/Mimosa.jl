@@ -14,6 +14,7 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
+        "Method" => "method.md",
         "Quick Start" => "quickstart.md",
         "Julia API" => "api.md",
         "CLI" => "cli.md",

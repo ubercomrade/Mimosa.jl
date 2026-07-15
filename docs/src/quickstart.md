@@ -3,11 +3,12 @@
 ## Installation
 
 Mimosa.jl requires Julia 1.10 or newer and is not currently registered in
-General. Install it from a local clone:
+General. Install it from a local clone, or develop the clone from another Julia
+environment:
 
 ```julia
 using Pkg
-Pkg.develop(path="/path/to/mimosa/Mimosa.jl")
+Pkg.develop(path="/path/to/Mimosa.jl")
 ```
 
 The examples below assume the repository root is the working directory.
@@ -116,7 +117,7 @@ Null bundles use format version 3 and strategy `"profile"` only.
 Threading is opt-in in both the runtime and the API:
 
 ```bash
-JULIA_NUM_THREADS=4 julia --project=Mimosa.jl
+JULIA_NUM_THREADS=4 julia --project=.
 ```
 
 ```julia

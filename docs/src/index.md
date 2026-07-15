@@ -33,6 +33,7 @@ Mimosa
 
 ## Navigation
 
+- [Method](method.md)
 - [Quick Start](quickstart.md)
 - [Julia API](api.md)
 - [CLI](cli.md)

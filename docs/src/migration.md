@@ -21,7 +21,7 @@ the `"motif"` null strategy were deliberately removed.
 ## Legacy Serialized Data
 
 Mimosa.jl never reads pickle/joblib. Historical conversion helpers remain under
-`Mimosa.jl/scripts/` and must be used only with explicitly trusted input because
+`scripts/` and must be used only with explicitly trusted input because
 Python deserialization can execute arbitrary code. Convert outside the Julia
 trust boundary, then validate the resulting portable bundle with `readmodel` or
 `loadnull`.
@@ -32,7 +32,7 @@ profile null distribution.
 
 ## Historical Fixtures
 
-Package-local parser/model inputs remain under `Mimosa.jl/test/fixtures/`. The
+Package-local parser/model inputs remain under `test/fixtures/`. The
 former root Python oracle corpus has been removed from the current source tree;
 it is not evidence that retired Python APIs remain supported. Any replacement
 corpus requires documented generators, dependency versions, commands,

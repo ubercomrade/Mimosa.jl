@@ -42,6 +42,6 @@ on fields named `name`, `representation`, `weights`, `order`, or
 `span`. See [Extending Mimosa](extending.md) and ADR 0003 for the full
 contract.
 
-The separate package under `Mimosa.jl/test/downstream/` verifies this contract
+The separate package under `test/downstream/` verifies this contract
 using public exports only, including a custom model defined in a separate
 downstream module.

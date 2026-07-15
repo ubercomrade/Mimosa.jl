@@ -6,7 +6,7 @@ stdout; diagnostics and errors go to stderr.
 Run commands from the repository root:
 
 ```bash
-julia --project=Mimosa.jl Mimosa.jl/app/mimosa.jl <command> [options]
+julia --project=. app/mimosa.jl <command> [options]
 ```
 
 ## Commands
@@ -16,7 +16,7 @@ julia --project=Mimosa.jl Mimosa.jl/app/mimosa.jl <command> [options]
 Compare model-derived or precomputed score profiles:
 
 ```bash
-JULIA_NUM_THREADS=4 julia --project=Mimosa.jl Mimosa.jl/app/mimosa.jl \
+JULIA_NUM_THREADS=4 julia --project=. app/mimosa.jl \
   profile examples/pif4.meme examples/gata2.meme \
   --model1-type pwm --model2-type pwm \
   --fasta examples/foreground.fa --metric co --threads 4
@@ -38,7 +38,7 @@ separate normalization FASTA. `--pvalue` requires a compatible explicit
 ### `build-null`
 
 ```bash
-julia --project=Mimosa.jl Mimosa.jl/app/mimosa.jl build-null motifs/ \
+julia --project=. app/mimosa.jl build-null motifs/ \
   --model-type pwm --groups groups.tsv --output output/null_bundle \
   --fasta examples/foreground.fa --metric co
 ```
@@ -51,21 +51,21 @@ a version-3 profile null bundle. `--jobs` is a deprecated alias for `--threads`.
 ### `cache clear`
 
 ```bash
-julia --project=Mimosa.jl Mimosa.jl/app/mimosa.jl \
+julia --project=. app/mimosa.jl \
   cache clear --cache-dir .mimosa-cache
 ```
 
 ### `inspect-model`
 
 ```bash
-julia --project=Mimosa.jl Mimosa.jl/app/mimosa.jl \
+julia --project=. app/mimosa.jl \
   inspect-model examples/foxa2.ihbcp --type bamm
 ```
 
 ### `convert-model`
 
 ```bash
-julia --project=Mimosa.jl Mimosa.jl/app/mimosa.jl \
+julia --project=. app/mimosa.jl \
   convert-model examples/pif4.meme output/pif4_bundle --type pwm
 ```
 
