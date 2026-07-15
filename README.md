@@ -13,15 +13,9 @@ Directly aligning the parameters of different model families is generally not me
    separate background sequence set for calibration.
 3. Select one best anchor per sequence when `-log10(FPR) == 0`, or all anchors
    above the requested threshold.
-4. Compare site-centered windows over shifts and the four strand orientations
-   `++`, `+-`, `-+`, and `--`.
+4. Compare site-centered windows over shifts and the four strand orientations.
 5. Return the highest-scoring alignment, its offset, orientation, and number of
    contributing sites.
-
-The reported offset is the query displacement relative to the target: a
-positive value means that the query is shifted to the right. Ties are resolved
-deterministically by score, contributing site count, smaller absolute shift,
-and orientation order `++`, `+-`, `-+`, `--`.
 
 See [Method](docs/src/method.md) for metric definitions, statistical
 significance, and references.
@@ -48,9 +42,6 @@ General registry, install the API directly from the repository:
 using Pkg
 Pkg.add(url="https://github.com/ubercomrade/Mimosa.jl.git")
 ```
-
-After registration, use `Pkg.add("Mimosa")`. Developers can use
-`Pkg.develop(path="/path/to/Mimosa.jl")` for a local checkout.
 
 ## CLI
 
@@ -81,9 +72,6 @@ distributions, and exit codes.
 Standalone archives for Linux, Windows, and macOS are attached to tagged GitHub
 Releases. They include the Julia runtime and do not require Julia to be
 installed.
-
-Maintainers must configure the `TAGBOT_SSH_KEY` repository secret before
-automating registered releases; see the [release guide](docs/src/release.md).
 
 ## Julia API
 
