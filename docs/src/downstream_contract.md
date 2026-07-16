@@ -36,7 +36,7 @@ mutate model structs, bypass validation, assume a global cache, or infer retired
 matrix-comparison APIs from historical documents.
 
 Downstream custom models subtype `AbstractMotifModel` and implement
-`modelname`, `motif_length`, and `scan_pair_kernel!` (plus
+`modelname`, `motif_length`, and `scan_kernel!` (plus
 `left_context`/`right_context` for context models). They must not rely
 on fields named `name`, `representation`, `weights`, `order`, or
 `span`. See [Extending Mimosa](extending.md) and ADR 0003 for the full

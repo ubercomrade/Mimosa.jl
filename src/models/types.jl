@@ -22,7 +22,7 @@ contract described in `docs/src/extending.md` and ADR 0003:
 
 - `modelname(model)::AbstractString`
 - `motif_length(model)::Integer`
-- `scan_pair_kernel!(forward, reverse, model, sequence, n_positions)` (or
+- `scan_kernel!(forward, reverse, model, sequence, n_positions)` (or
   specialized `scan_forward!`/`scan_reverse!`/`scan_both!` methods)
 
 `left_context` and `right_context` default to zero. `window_size`,

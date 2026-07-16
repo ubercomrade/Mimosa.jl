@@ -27,7 +27,7 @@ right_context
 window_size
 npositions
 site_start_offset
-scan_pair_kernel!
+scan_kernel!
 validate_model
 ```
 
@@ -53,7 +53,7 @@ scan
 scan!
 scan_forward!
 scan_reverse!
-scan_best!
+best_hits!
 scan_both!
 scan_result_lengths
 scorebounds

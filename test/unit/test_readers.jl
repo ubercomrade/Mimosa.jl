@@ -28,19 +28,19 @@ end
     pfm_pwm = Mimosa._read_pfm_pwm(joinpath(EXAMPLES, "pif4.pfm"))
     @test meme_pwm isa PWM
     @test pfm_pwm isa PWM
-    @test meme_pwm.weights ≈ pfm_pwm.weights
+    @test meme_pwm.representation ≈ pfm_pwm.representation
 end
 
 @testset "readmodel detects format from extension" begin
     pwm_meme = readmodel(joinpath(EXAMPLES, "pif4.meme"))
     @test pwm_meme isa PWM
-    @test size(pwm_meme.weights) == (5, 12)
+    @test size(pwm_meme.representation) == (5, 12)
     pwm_pfm = readmodel(joinpath(EXAMPLES, "pif4.pfm"))
     @test pwm_pfm isa PWM
-    @test size(pwm_pfm.weights) == (5, 12)
+    @test size(pwm_pfm.representation) == (5, 12)
     # Both should produce identical PWM weights since pif4.pfm and pif4.meme
     # represent the same motif.
-    @test pwm_meme.weights ≈ pwm_pfm.weights
+    @test pwm_meme.representation ≈ pwm_pfm.representation
 end
 
 @testset "MEME multi-motif index selection" begin

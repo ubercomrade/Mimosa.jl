@@ -2,12 +2,12 @@
 # (Extensibility API Plan §4, §9).
 #
 # A custom model that needs no context can subtype `AbstractMotifModel`,
-# implement `modelname`, `motif_length`, and `scan_pair_kernel!`, and
+# implement `modelname`, `motif_length`, and `scan_kernel!`, and
 # automatically participate in scan, prepare_profile, compare, selectsites,
 # and reconstruct_pfm without touching Mimosa.jl source.
 #
 # This file provides:
-#   - the safe public wrapper `scan_pair_kernel!` boundary (used by the
+#   - the safe public wrapper `scan_kernel!` boundary (used by the
 #     generic scan fallback),
 #   - `validate_model(model; capability=...)` for runtime interface checks,
 #   - `ModelInterfaceError` is defined in `errors.jl`.
@@ -15,7 +15,7 @@
 const SUPPORTED_CAPABILITIES = (:compare, :sites, :cache)
 
 """
-    scan_pair_kernel!(forward, reverse, model, sequence, n_positions)
+    scan_kernel!(forward, reverse, model, sequence, n_positions)
 
 Fill `forward[1:n_positions]` and `reverse[1:n_positions]` with the
 forward and reverse strand scores for `model` against one encoded
@@ -34,26 +34,23 @@ buffers, and must write exactly `n_positions` elements to each buffer.
 
 Canonical scanning value type is `Float32`.
 
-Specialized `scan_forward!`, `scan_reverse!`, `scan_best!`, or
+Specialized `scan_forward!`, `scan_reverse!`, `best_hits!`, or
 `scan_both!` methods may be added as performance overrides, but custom
-models must still implement this pair kernel as their portable scan
+models must still implement this kernel as their portable scan
 capability.
 """
-function scan_pair_kernel! end
+function scan_kernel! end
 
 # ── Specialized-method detection (compile-time capability check) ─────────────
 #
 # `validate_model` uses these helpers to confirm that a model has a scan
 # path. The generic `scan_*!` methods for `AbstractMotifModel` use
-# `scan_pair_kernel!`, so detecting "has a scan path" reduces to:
-#   - the model is one of the built-in rolling-k-mer families, OR
-#   - the model defines `scan_pair_kernel!` for its concrete type.
+# `scan_kernel!`, so detecting "has a scan path" reduces to checking whether
+# the model defines the kernel for its concrete type.
 
-_has_builtin_scan_kernel(::AbstractMotifModel) = false
-
-function _has_pair_kernel(model)
+function _has_scan_kernel(model)
     return hasmethod(
-        scan_pair_kernel!,
+        scan_kernel!,
         (
             AbstractVector{Float32},
             AbstractVector{Float32},
@@ -66,32 +63,25 @@ end
 
 # ── Safe wrapper that uses the user-provided pair kernel ────────────────────
 #
-# This wrapper is the single safe boundary that calls user code. It is
-# used by the generic fallback `scan_both!`/`scan_forward!`/
-# `scan_reverse!`/`scan_best!` defined in `scanning/n_order_scan.jl`
-# only when no specialized method exists for the concrete model type.
+# This wrapper calls model code after the public scanning boundary has
+# validated inputs. It enforces the kernel return-value contract and is
+# used by `scan_both!`/`scan_forward!`/`scan_reverse!`/`best_hits!`
+# defined in `scanning/n_order_scan.jl`.
 
-function _scan_pair_kernel_safe!(
+function _scan_kernel_safe!(
     forward::AbstractVector{Float32},
     reverse::AbstractVector{Float32},
     model::AbstractMotifModel,
     seq::AbstractVector{UInt8},
     n_pos::Int,
 )
-    # Validate inputs once at the boundary before user code.
-    _validate_scan_input(seq, n_pos, window_size(model), forward, reverse)
-    n_pos == 0 && return (forward, reverse)
-    Base.mightalias(forward, reverse) &&
-        throw(ArgumentError("forward and reverse destinations must not alias."))
-    # The user kernel receives validated input and must fill both buffers.
-    result = scan_pair_kernel!(forward, reverse, model, seq, n_pos)
+    result = scan_kernel!(forward, reverse, model, seq, n_pos)
     valid_result =
         result isa Tuple &&
         length(result) == 2 &&
         result[1] === forward &&
         result[2] === reverse
-    valid_result ||
-        throw(InvariantError("scan_pair_kernel! must return (forward, reverse)."))
+    valid_result || throw(InvariantError("scan_kernel! must return (forward, reverse)."))
     return (forward, reverse)
 end
 
@@ -116,7 +106,7 @@ requested `capability`. Returns `model` on success, throws
 
 | Capability       | Required methods |
 |------------------|------------------|
-| `:compare`       | `AbstractMotifModel` subtype, `modelname`, `motif_length`, `scan_pair_kernel!` |
+| `:compare`       | `AbstractMotifModel` subtype, `modelname`, `motif_length`, `scan_kernel!` |
 | `:sites`         | `:compare` plus valid geometry: positive `motif_length`, non-negative contexts, `window_size >= motif_length` |
 | `:cache`         | `:compare` plus `model_fingerprint` |
 
@@ -173,18 +163,14 @@ function validate_model(model; capability::Symbol=:compare)
         ),
     )
 
-    # Scan capability. For built-in rolling-k-mer models, the optimized
-    # scan kernels are always available. For a custom model, the only
-    # accepted extension point is `scan_pair_kernel!` defined for the
-    # concrete type. The generic `scan_*!` fallbacks for
-    # `AbstractMotifModel` are *wrappers* around `scan_pair_kernel!`
-    # and do not by themselves constitute a scan path.
-    has_scan_path = _has_builtin_scan_kernel(model) || _has_pair_kernel(model)
-    has_scan_path || throw(
+    # Every model declares its scan capability through `scan_kernel!`.
+    # Generic `scan_*!` methods are wrappers and do not themselves
+    # constitute a scan path.
+    _has_scan_kernel(model) || throw(
         _interface_error(
             capability,
             model,
-            "missing scan capability: implement `scan_pair_kernel!(forward, reverse, model, seq, n_pos)` " *
+            "missing scan capability: implement `scan_kernel!(forward, reverse, model, seq, n_pos)` " *
             "for the concrete model type.",
         ),
     )
@@ -213,18 +199,15 @@ function validate_model(model; capability::Symbol=:compare)
     end
 
     if capability === :cache
-        builtin_fingerprint = _has_builtin_scan_kernel(model)
         fallback = which(model_fingerprint, (AbstractProfileSource,))
         selected = which(model_fingerprint, (typeof(model),))
-        builtin_fingerprint ||
-            selected !== fallback ||
-            throw(
-                _interface_error(
-                    capability,
-                    model,
-                    "missing `model_fingerprint(model)::String`; required for cache/null compatibility tracking.",
-                ),
-            )
+        selected !== fallback || throw(
+            _interface_error(
+                capability,
+                model,
+                "missing `model_fingerprint(model)::String`; required for cache/null compatibility tracking.",
+            ),
+        )
         fp = model_fingerprint(model)
         fp isa AbstractString || throw(
             _interface_error(capability, model, "model_fingerprint must return a String."),

@@ -43,6 +43,12 @@ function model_fingerprint(source::AbstractProfileSource)
     return content_fingerprint(source)
 end
 
+model_fingerprint(model::PWM) = content_fingerprint(model)
+model_fingerprint(model::BaMM) = content_fingerprint(model)
+model_fingerprint(model::SiteGA) = content_fingerprint(model)
+model_fingerprint(model::Dimont) = content_fingerprint(model)
+model_fingerprint(model::Slim) = content_fingerprint(model)
+
 """
     model_collection_fingerprint(sources::AbstractVector{<:AbstractProfileSource})
 
@@ -363,7 +369,7 @@ _model_kind(::Dimont) = "dimont"
 _model_kind(::Slim) = "slim"
 _model_kind(::ScoreProfile) = "score_profile"
 
-_model_array(model::PWM) = model.weights
+_model_array(model::PWM) = model.representation
 _model_array(model::BaMM) = model.representation
 _model_array(model::SiteGA) = model.representation
 _model_array(model::Dimont) = model.representation

@@ -8,7 +8,7 @@ const PSEUDOCOUNT_PWM::Float32 = 1e-4
 
 Position Weight Matrix: log-odds weights for scanning.
 
-`weights` uses axes `(base, position)` with `base ∈ 1:5` (A, C, G, T, N).
+`representation` uses axes `(base, position)` with `base ∈ 1:5` (A, C, G, T, N).
 The fifth row holds the N-state score (minimum over concrete bases), matching
 the Python representation that materializes a 5-row extended PWM.
 `background` is a 4-tuple of nucleotide background frequencies.
@@ -16,21 +16,23 @@ the Python representation that materializes a 5-row extended PWM.
 struct PWM{T<:AbstractFloat,M<:AbstractMatrix{T},B<:NTuple{4,AbstractFloat}} <:
        AbstractMotifModel
     name::String
-    weights::M
+    representation::M
     background::B
 
     function PWM{T,M,B}(
-        name::String, weights::M, background::B
+        name::String, representation::M, background::B
     ) where {T<:AbstractFloat,M<:AbstractMatrix{T},B<:NTuple{4,AbstractFloat}}
-        _validate_pwm_weights(weights, background)
-        return new{T,M,B}(name, weights, background)
+        _validate_pwm_weights(representation, background)
+        return new{T,M,B}(name, representation, background)
     end
 end
 
 function PWM(
-    name::AbstractString, weights::AbstractMatrix{T}, background::NTuple{4}
+    name::AbstractString, representation::AbstractMatrix{T}, background::NTuple{4}
 ) where {T<:AbstractFloat}
-    return PWM{T,typeof(weights),typeof(background)}(String(name), weights, background)
+    return PWM{T,typeof(representation),typeof(background)}(
+        String(name), representation, background
+    )
 end
 
 function _validate_pwm_weights(weights::AbstractMatrix, background::NTuple{4})
@@ -71,8 +73,7 @@ function _validate_pwm_weights(weights::AbstractMatrix, background::NTuple{4})
     return nothing
 end
 
-Base.length(model::PWM) = size(model.weights, 2)
-is_scannable(::PWM) = true
+Base.length(model::PWM) = size(model.representation, 2)
 
 # ── Extensibility API (ADR 0003) ──────────────────────────────────────────────
 #
@@ -99,7 +100,7 @@ Return the matrix used by the scanning kernels. Matrix motifs expose their
 frequency or weight matrix; higher-order motifs expose their flattened
 context-by-position representation.
 """
-scorematrix(model::PWM) = model.weights
+function scorematrix end
 
 """
     scoretype(model::AbstractMotifModel)
@@ -118,15 +119,17 @@ site_start_offset(::PWM) = 0
 
 Base.eltype(::Type{<:PWM{T}}) where {T} = T
 
-Base.size(model::PWM) = size(model.weights)
+Base.size(model::PWM) = size(model.representation)
 
 function Base.:(==)(a::PWM, b::PWM)
-    return a.name == b.name && a.weights == b.weights && a.background == b.background
+    return a.name == b.name &&
+           a.representation == b.representation &&
+           a.background == b.background
 end
 
 function Base.isapprox(a::PWM, b::PWM; kwargs...)
     return a.name == b.name &&
-           isapprox(a.weights, b.weights; kwargs...) &&
+           isapprox(a.representation, b.representation; kwargs...) &&
            isapprox(collect(a.background), collect(b.background); kwargs...)
 end
 
@@ -243,7 +246,7 @@ function reverse_complement(weights::AbstractMatrix{T}) where {T<:AbstractFloat}
 end
 
 function reverse_complement(model::PWM)
-    return PWM(model.name, reverse_complement(model.weights), model.background)
+    return PWM(model.name, reverse_complement(model.representation), model.background)
 end
 
 """
@@ -255,7 +258,7 @@ Mirrors Python's `score_bounds_from_representation`: take the per-column min/max
 across all rows and sum across positions.
 """
 function scorebounds(model::PWM)
-    w = model.weights
+    w = model.representation
     col_min = vec(minimum(w; dims=1))
     col_max = vec(maximum(w; dims=1))
     return (sum(col_min), sum(col_max))

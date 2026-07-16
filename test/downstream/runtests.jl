@@ -110,7 +110,7 @@ end
     loaded = readmodel(bundle_path)
     @test loaded isa PWM
     @test loaded.name == pwm.name
-    @test size(loaded.weights) == size(pwm.weights)
+    @test size(loaded.representation) == size(pwm.representation)
 
     # Write and re-read BaMM bundle
     bamm_path = joinpath(tmpdir, "bamm_bundle")
@@ -421,7 +421,7 @@ end
 Mimosa.modelname(m::MatchCounter) = m.label
 Mimosa.motif_length(m::MatchCounter) = length(m.pattern)
 
-function Mimosa.scan_pair_kernel!(
+function Mimosa.scan_kernel!(
     fwd_out::AbstractVector{Float32},
     rev_out::AbstractVector{Float32},
     model::MatchCounter,
@@ -457,7 +457,7 @@ Mimosa.motif_length(model::ContextCounter) = model.width
 Mimosa.left_context(model::ContextCounter) = model.upstream
 Mimosa.right_context(model::ContextCounter) = model.downstream
 
-function Mimosa.scan_pair_kernel!(
+function Mimosa.scan_kernel!(
     fwd_out::AbstractVector{Float32},
     rev_out::AbstractVector{Float32},
     model::ContextCounter,

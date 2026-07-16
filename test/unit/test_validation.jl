@@ -93,7 +93,7 @@ end
     dest = Vector{Float32}(undef, n_pos)
     @test_nowarn scan_forward!(dest, pwm, seq, n_pos)
     @test_nowarn scan_reverse!(dest, pwm, seq, n_pos)
-    @test_nowarn scan_best!(dest, pwm, seq, n_pos)
+    @test_nowarn best_hits!(dest, pwm, seq, n_pos)
 
     fwd = Vector{Float32}(undef, n_pos)
     rev = Vector{Float32}(undef, n_pos)
@@ -104,7 +104,7 @@ end
     if n_pos > 0
         @test_throws ArgumentError scan_forward!(short_dest, pwm, seq, n_pos)
         @test_throws ArgumentError scan_reverse!(short_dest, pwm, seq, n_pos)
-        @test_throws ArgumentError scan_best!(short_dest, pwm, seq, n_pos)
+        @test_throws ArgumentError best_hits!(short_dest, pwm, seq, n_pos)
     end
 
     if n_pos > 0
@@ -121,7 +121,7 @@ end
     # Negative n_pos should throw.
     @test_throws ArgumentError scan_forward!(dest, pwm, seq, -1)
     @test_throws ArgumentError scan_reverse!(dest, pwm, seq, -1)
-    @test_throws ArgumentError scan_best!(dest, pwm, seq, -1)
+    @test_throws ArgumentError best_hits!(dest, pwm, seq, -1)
     @test_throws ArgumentError scan_both!(fwd, rev, pwm, seq, -1)
 end
 
@@ -193,7 +193,8 @@ end
     pwm = readmodel(joinpath(EXAMPLES, "pif4.meme"))
     @test motif_length(pwm) == length(pwm)
     @test window_size(pwm) == length(pwm)
-    @test scorematrix(pwm) === pwm.weights
+    @test scorematrix(pwm) === pwm.representation
+    @test :weights ∉ propertynames(pwm)
     @test scoretype(pwm) == Float32
     batch = EncodedSequenceBatch([UInt8[], UInt8[0, 1, 2]])
     @test firstindex(batch) == 1

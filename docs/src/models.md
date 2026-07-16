@@ -86,7 +86,7 @@ scan-track length.
 
 See [Extending Mimosa](extending.md). A custom model subtypes
 `AbstractMotifModel` and implements `modelname`, `motif_length`, and
-`scan_pair_kernel!`. Context models additionally implement
+`scan_kernel!`. Context models additionally implement
 `left_context` and/or `right_context`. The generic scan, prepare,
 compare, sites, and PFM reconstruction workflows then work through the
 public API without modifying Mimosa.jl.

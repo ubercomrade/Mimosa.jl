@@ -26,7 +26,7 @@ end
 Mimosa.modelname(model::MyModel) = model.label
 Mimosa.motif_length(model::MyModel) = length(model.pattern)
 
-function Mimosa.scan_pair_kernel!(
+function Mimosa.scan_kernel!(
     fwd_out::AbstractVector{Float32},
     rev_out::AbstractVector{Float32},
     model::MyModel,
@@ -92,7 +92,7 @@ capabilities:
 
 | Capability | Required methods |
 |---|---|
-| `:compare` | `AbstractMotifModel` subtype, `modelname`, `motif_length`, `scan_pair_kernel!` |
+| `:compare` | `AbstractMotifModel` subtype, `modelname`, `motif_length`, `scan_kernel!` |
 | `:sites` | `:compare` plus valid geometry (positive `motif_length`, non-negative contexts) |
 | `:cache` | `:compare` plus `model_fingerprint` returning a non-empty SHA-256 string |
 
@@ -108,9 +108,9 @@ inner loops and worker tasks do not repeat it.
   bundle compatibility tracking. Plain `compare` does not call it. A
   custom model implements it as a stable SHA-256 hex string of all
   parameters that affect scores.
-- Specialized `scan_forward!`/`scan_reverse!`/`scan_best!`/`scan_both!`
+- Specialized `scan_forward!`/`scan_reverse!`/`best_hits!`/`scan_both!`
   methods are optional performance overrides; the generic fallback
-  already drives `scan_pair_kernel!` correctly. Add one only after a
+  already drives `scan_kernel!` correctly. Add one only after a
   benchmark justifies it.
 
 ## External score adapter (no `AbstractMotifModel`)
@@ -149,9 +149,9 @@ not part of this extension contract.
   not by editing a registry dictionary.
 - **No structural duck typing**: generic workflows call
   `modelname(model)`, `motif_length(model)`, `left_context(model)`,
-  `right_context(model)`, and `scan_pair_kernel!`. They never access
-  `model.name`, `model.representation`, `model.weights`, `model.order`,
-  or `model.span` on an `AbstractMotifModel` value.
+  `right_context(model)`, and `scan_kernel!`. They never access
+  `model.name`, `model.representation`, `model.order`, or `model.span` on an
+  `AbstractMotifModel` value.
 - **No `Any` fields**: all model fields must have concrete or
   parametric types.
 - **No string dispatch in hot paths**: strings and symbols are parsed

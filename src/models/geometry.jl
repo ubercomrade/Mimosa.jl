@@ -6,7 +6,7 @@
 #
 #   modelname(model)
 #   motif_length(model)
-#   scan_pair_kernel!(forward, reverse, model, sequence, n_positions)
+#   scan_kernel!(forward, reverse, model, sequence, n_positions)
 #
 # `left_context` and `right_context` default to zero. Models with context
 # override only the nonzero side(s).

@@ -20,7 +20,7 @@ using Mimosa
 
     @test loaded isa PWM
     @test loaded.name == pwm.name
-    @test loaded.weights == pwm.weights
+    @test loaded.representation == pwm.representation
     @test loaded.background == pwm.background
 end
 
@@ -189,7 +189,7 @@ end
 
     model = readmodel(pfm_path)
     @test model isa PWM
-    @test size(model.weights) == (5, 4)
+    @test size(model.representation) == (5, 4)
 end
 
 function _storage_test_pwm()

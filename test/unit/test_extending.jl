@@ -1,7 +1,7 @@
 # Tests for the public extension contract (ADR 0003, Extensibility API Plan §4, §9).
 #
 # Defines a minimal custom model that satisfies only the three required
-# methods (`modelname`, `motif_length`, `scan_pair_kernel!`) plus models
+# methods (`modelname`, `motif_length`, `scan_kernel!`) plus models
 # with left/right context, and verifies that the public scan/prepare/
 # compare/sites workflows work through the public API only — no private
 # names, no struct fields named `representation`/`weights`/`order`/`span`.
@@ -24,7 +24,7 @@ end
 Mimosa.modelname(m::ConsensusModel) = m.name
 Mimosa.motif_length(m::ConsensusModel) = length(m.consensus)
 
-function Mimosa.scan_pair_kernel!(
+function Mimosa.scan_kernel!(
     fwd_out::AbstractVector{Float32},
     rev_out::AbstractVector{Float32},
     model::ConsensusModel,
@@ -67,7 +67,7 @@ Mimosa.motif_length(m::ContextModel) = m.motif_length
 Mimosa.left_context(m::ContextModel) = m.left_context
 Mimosa.right_context(m::ContextModel) = m.right_context
 
-function Mimosa.scan_pair_kernel!(
+function Mimosa.scan_kernel!(
     fwd_out::AbstractVector{Float32},
     rev_out::AbstractVector{Float32},
     model::ContextModel,
@@ -152,7 +152,7 @@ end
         length::Int
     end
     Mimosa.motif_length(m::NoNameModel) = m.length
-    Mimosa.scan_pair_kernel!(
+    Mimosa.scan_kernel!(
         f::AbstractVector{Float32},
         r::AbstractVector{Float32},
         m::NoNameModel,
@@ -196,7 +196,7 @@ end
     end
     Mimosa.modelname(m::EmptyNameModel) = m.name
     Mimosa.motif_length(m::EmptyNameModel) = m.length
-    Mimosa.scan_pair_kernel!(
+    Mimosa.scan_kernel!(
         f::AbstractVector{Float32},
         r::AbstractVector{Float32},
         m::EmptyNameModel,
@@ -218,7 +218,7 @@ end
 
     struct BoundaryNoNameModel <: Mimosa.AbstractMotifModel end
     Mimosa.motif_length(::BoundaryNoNameModel) = 1
-    Mimosa.scan_pair_kernel!(
+    Mimosa.scan_kernel!(
         f::AbstractVector{Float32},
         r::AbstractVector{Float32},
         ::BoundaryNoNameModel,
@@ -231,7 +231,7 @@ end
     Mimosa.modelname(::BadWindowModel) = "bad-window"
     Mimosa.motif_length(::BadWindowModel) = 2
     Mimosa.window_size(::BadWindowModel) = 3
-    Mimosa.scan_pair_kernel!(
+    Mimosa.scan_kernel!(
         f::AbstractVector{Float32},
         r::AbstractVector{Float32},
         ::BadWindowModel,
@@ -244,7 +244,7 @@ end
     Mimosa.modelname(::BadOffsetModel) = "bad-offset"
     Mimosa.motif_length(::BadOffsetModel) = 2
     Mimosa.site_start_offset(::BadOffsetModel) = 1
-    Mimosa.scan_pair_kernel!(
+    Mimosa.scan_kernel!(
         f::AbstractVector{Float32},
         r::AbstractVector{Float32},
         ::BadOffsetModel,
@@ -262,7 +262,7 @@ end
     end
     Mimosa.modelname(model::FlexibleModel) = model.name
     Mimosa.motif_length(model::FlexibleModel) = model.width
-    function Mimosa.scan_pair_kernel!(
+    function Mimosa.scan_kernel!(
         f::AbstractVector{Float32},
         r::AbstractVector{Float32},
         ::FlexibleModel,
@@ -293,7 +293,7 @@ end
     struct BadReturnModel <: Mimosa.AbstractMotifModel end
     Mimosa.modelname(::BadReturnModel) = "bad-return"
     Mimosa.motif_length(::BadReturnModel) = 1
-    function Mimosa.scan_pair_kernel!(
+    function Mimosa.scan_kernel!(
         f::AbstractVector{Float32},
         r::AbstractVector{Float32},
         ::BadReturnModel,
@@ -309,7 +309,7 @@ end
     struct WeakFingerprintModel <: Mimosa.AbstractMotifModel end
     Mimosa.modelname(::WeakFingerprintModel) = "weak-fingerprint"
     Mimosa.motif_length(::WeakFingerprintModel) = 1
-    Mimosa.scan_pair_kernel!(
+    Mimosa.scan_kernel!(
         f::AbstractVector{Float32},
         r::AbstractVector{Float32},
         ::WeakFingerprintModel,
@@ -324,7 +324,7 @@ end
     struct BrokenFingerprintModel <: Mimosa.AbstractMotifModel end
     Mimosa.modelname(::BrokenFingerprintModel) = "broken-fingerprint"
     Mimosa.motif_length(::BrokenFingerprintModel) = 1
-    Mimosa.scan_pair_kernel!(
+    Mimosa.scan_kernel!(
         f::AbstractVector{Float32},
         r::AbstractVector{Float32},
         ::BrokenFingerprintModel,
@@ -532,7 +532,7 @@ end
     end
     Mimosa.modelname(m::ThrowingModel) = m.name
     Mimosa.motif_length(m::ThrowingModel) = m.length
-    function Mimosa.scan_pair_kernel!(
+    function Mimosa.scan_kernel!(
         f::AbstractVector{Float32},
         r::AbstractVector{Float32},
         m::ThrowingModel,

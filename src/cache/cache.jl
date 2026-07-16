@@ -156,7 +156,7 @@ end
 # above calls `modelname(model)` and `_write_model_fingerprint_body!`,
 # which throws a clear error for unknown custom model types.
 function _write_model_fingerprint_body!(io::IO, model::PWM)
-    write(io, content_fingerprint(model.weights))
+    write(io, content_fingerprint(model.representation))
     write(io, "|")
     return write(io, join(string.(model.background), ","))
 end

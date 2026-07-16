@@ -497,11 +497,11 @@ function bench_pwm_scan!(results::Vector{BenchResult}, config::BenchConfig)
             )
 
             # Best strand
-            scan_best!(dest, pwm, enc, n_pos)
-            b = BenchmarkTools.@benchmark scan_best!($dest, $pwm, $enc, $n_pos)
+            best_hits!(dest, pwm, enc, n_pos)
+            b = BenchmarkTools.@benchmark best_hits!($dest, $pwm, $enc, $n_pos)
             println(
                 @sprintf(
-                    "  scan_best!     w=%d len=%d  median=%.3f μs  allocs=%d",
+                    "  best_hits!     w=%d len=%d  median=%.3f μs  allocs=%d",
                     width,
                     seqlen,
                     median(b).time / 1000,
@@ -511,7 +511,7 @@ function bench_pwm_scan!(results::Vector{BenchResult}, config::BenchConfig)
             push!(
                 results,
                 bench_result(
-                    "pwm_scan_best",
+                    "pwm_best_hits",
                     "pwm_scan",
                     b;
                     width=width,
@@ -1030,7 +1030,7 @@ function bench_null_distribution!(results::Vector{BenchResult}, config::BenchCon
     models = [pwm1, pwm2, pwm3, pwm4]
     # Duplicate with different names to get more comparisons
     for i in 5:10
-        m = PWM("model_$i", copy(pwm1.weights), pwm1.background)
+        m = PWM("model_$i", copy(pwm1.representation), pwm1.background)
         push!(models, m)
     end
 

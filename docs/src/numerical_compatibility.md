@@ -54,7 +54,7 @@ window.
 The public geometry contract (ADR 0003) defines `motif_length`,
 `left_context`, and `right_context` as the only required geometry
 accessors. `window_size`, `npositions`, and `site_start_offset` are
-derived. A custom model implementing `scan_pair_kernel!` produces
+derived. A custom model implementing `scan_kernel!` produces
 Float32 scan values through the same code path as the built-in
 specialized kernels; the fallback may compute both strands even for a
 single-strand request, but the visible single-strand result is

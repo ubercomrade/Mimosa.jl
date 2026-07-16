@@ -25,11 +25,11 @@ end
 @testset "non-! functions do not mutate inputs" begin
     pwm = readmodel(joinpath(EXAMPLES, "pif4.meme"))
     sequences = make_random_sequences(20, 100; seed=42)
-    copy_w = copy(pwm.weights)
+    copy_w = copy(pwm.representation)
     compare(pwm, pwm, sequences; metric=:co)
     scorebounds(pwm)
     reverse_complement(pwm)
-    @test pwm.weights == copy_w
+    @test pwm.representation == copy_w
 end
 
 @testset "comparison is deterministic" begin
@@ -72,11 +72,11 @@ end
     pwm = readmodel(joinpath(EXAMPLES, "pif4.meme"))
     seq = encode_sequence("ACGTACGTACGTACGTACGTACGTAC")
     seq_copy = copy(seq)
-    weights_copy = copy(pwm.weights)
+    weights_copy = copy(pwm.representation)
     scan(pwm, seq; strands=ForwardOnly())
     scan(pwm, seq; strands=BothStrands())
     @test seq == seq_copy
-    @test pwm.weights == weights_copy
+    @test pwm.representation == weights_copy
 end
 
 @testset "scan is deterministic" begin
