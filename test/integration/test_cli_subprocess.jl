@@ -65,11 +65,7 @@ end
 
 @testset "CLI subprocess: build-null profile strategy" begin
     dir = mktempdir()
-    coll_dir = joinpath(dir, "motifs")
-    mkpath(coll_dir)
-    cp(joinpath(EXAMPLES, "foxa2.meme"), joinpath(coll_dir, "foxa2.meme"))
-    cp(joinpath(EXAMPLES, "gata2.meme"), joinpath(coll_dir, "gata2.meme"))
-    cp(joinpath(EXAMPLES, "gata4.meme"), joinpath(coll_dir, "gata4.meme"))
+    coll_dir = _copy_motif_collection(dir, EXAMPLES)
     groups_path = joinpath(dir, "groups.tsv")
     write(groups_path, "motif\tgroup\nMA0047.3\tA\nMA0036.2\tB\nMA0482.2\tC\n")
     output_path = joinpath(dir, "null")

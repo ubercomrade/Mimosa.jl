@@ -282,31 +282,6 @@ function _validate_cache_key(key::AbstractString)
     return value
 end
 
-function _cache_path(cache::Cache, key::AbstractString, suffix::AbstractString)
-    value = _validate_cache_key(key)
-    root = abspath(cache.directory)
-    path = joinpath(root, value * suffix)
-    root_real = ispath(root) ? realpath(root) : root
-    path_real = try
-        if islink(path)
-            realpath(path)
-        elseif ispath(path)
-            realpath(path)
-        else
-            parent = dirname(path)
-            parent_real = ispath(parent) ? realpath(parent) : parent
-            joinpath(parent_real, basename(path))
-        end
-    catch error
-        throw(ArgumentError("could not resolve cache path: $(sprint(showerror, error))."))
-    end
-    relative = relpath(path_real, root_real)
-    separator = Sys.iswindows() ? "\\\\" : "/"
-    (relative == ".." || startswith(relative, ".." * separator)) &&
-        throw(ArgumentError("cache path escapes cache root."))
-    return path
-end
-
 function _cache_entry_dir(cache::Cache, key::AbstractString)
     value = _validate_cache_key(key)
     root = abspath(cache.directory)
@@ -522,15 +497,6 @@ function _validate_cache_entry(path::AbstractString, meta_path::AbstractString)
     catch
         return false
     end
-end
-
-function _flush_and_rename(tmp_path::AbstractString, final_path::AbstractString)
-    # Flush before rename; filesystem durability is not promised here.
-    open(tmp_path, "r+") do io
-        return flush(io)
-    end
-    mv(tmp_path, final_path; force=true)
-    return nothing
 end
 
 function _flush_file(path::AbstractString)

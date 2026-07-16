@@ -41,7 +41,7 @@ The representation is a flattened 2D view of the full `(5, 5, ..., 5,
 motif_length)` tensor, materialized from the XML mixture parameters via
 log-sum-exp over components and ancestors.
 """
-struct Slim{T<:AbstractFloat,M<:AbstractMatrix{T}} <: AbstractMotifModel
+struct Slim{T<:AbstractFloat,M<:AbstractMatrix{T}} <: AbstractContextModel{T}
     name::String
     representation::M
     span::Int
@@ -50,7 +50,7 @@ struct Slim{T<:AbstractFloat,M<:AbstractMatrix{T}} <: AbstractMotifModel
     function Slim{T,M}(
         name::String, representation::M, span::Int, motif_length::Int
     ) where {T<:AbstractFloat,M<:AbstractMatrix{T}}
-        _validate_slim(representation, span, motif_length)
+        _validate_context_model(representation, span, motif_length, "Slim", "span")
         return new{T,M}(name, representation, span, motif_length)
     end
 end
@@ -66,123 +66,18 @@ function Slim(
     )
 end
 
-function _validate_slim(representation::AbstractMatrix, span::Int, motif_length::Int)
-    if span < 0
-        throw(ModelDimensionError("Slim span must be non-negative, got $span."))
-    end
-    # Guard against exponentiation blow-up: 5^(span+1) rows.
-    if span > 10
-        throw(
-            ModelDimensionError(
-                "Slim span must be <= 10 to avoid allocation blow-up, got $span."
-            ),
-        )
-    end
-    expected_rows = 5^(span + 1)
-    if size(representation, 1) != expected_rows
-        throw(
-            ModelDimensionError(
-                "Slim representation must have $expected_rows rows for span=$span, got $(size(representation, 1)).",
-            ),
-        )
-    end
-    if size(representation, 2) != motif_length
-        throw(
-            ModelDimensionError(
-                "Slim representation columns ($(size(representation, 2))) must match motif_length ($motif_length).",
-            ),
-        )
-    end
-    if motif_length <= 0
-        throw(ModelDimensionError("Slim motif_length must be positive, got $motif_length."))
-    end
-    if !all(isfinite, representation)
-        throw(ModelFormatError("", "Slim representation contains non-finite values."))
-    end
-    return nothing
-end
-
-Base.length(model::Slim) = model.motif_length
-Base.eltype(::Type{<:Slim{T}}) where {T} = T
-Base.size(model::Slim) = size(model.representation)
-
 function Base.show(io::IO, model::Slim)
     return print(
         io, "Slim(\"$(model.name)\", span=$(model.span), $(size(model.representation)))"
     )
 end
 
-function Base.:(==)(a::Slim, b::Slim)
-    return a.name == b.name &&
-           a.span == b.span &&
-           a.motif_length == b.motif_length &&
-           a.representation == b.representation
-end
-
-function Base.isapprox(a::Slim, b::Slim; kwargs...)
-    return a.name == b.name &&
-           a.span == b.span &&
-           a.motif_length == b.motif_length &&
-           isapprox(a.representation, b.representation; kwargs...)
-end
-
-"""
-    scorebounds(model::Slim)
-
-Return `(min_score, max_score)` theoretical score bounds for a [`Slim`](@ref).
-
-Mirrors Python's `score_bounds_from_representation`: take the per-column min/max
-across all context codes and sum across positions.
-"""
-function scorebounds(model::Slim)
-    col_min = vec(minimum(model.representation; dims=1))
-    col_max = vec(maximum(model.representation; dims=1))
-    return (sum(col_min), sum(col_max))
-end
-
-"""
-    kmer(model::Slim)
-
-Return the k-mer size (= span + 1) for scanning.
-"""
-kmer(model::Slim) = model.span + 1
+Base.:(==)(a::Slim, b::Slim) = _context_model_equal(a, b)
+Base.isapprox(a::Slim, b::Slim; kwargs...) = _context_model_isapprox(a, b; kwargs...)
 
 # ── Extensibility API (ADR 0003) ──────────────────────────────────────────────
 #
 # Slim uses `span` bases preceding the motif site as context. The site
 # spans `motif_length` positions; there is no downstream context.
 
-modelname(model::Slim) = model.name
-motif_length(model::Slim) = model.motif_length
 left_context(model::Slim) = model.span
-right_context(::Slim) = 0
-
-"""
-    context_length(model::Slim)
-
-Return the context length (= span) for scanning.
-"""
-context_length(model::Slim) = left_context(model)
-
-"""
-    window_size(model::Slim)
-
-Return the total window size needed for scanning (= motif_length + span).
-"""
-window_size(model::Slim) = model.motif_length + left_context(model)
-
-"""
-    scan_width(model::Slim)
-
-Return the number of scanning positions per sequence: `window_size` terms
-minus `kmer` plus 1 = `motif_length`.
-"""
-scan_width(model::Slim) = model.motif_length
-
-"""
-    site_start_offset(model::Slim)
-
-Return the offset from scan position to motif start (= `span`): the first
-`span` bases of the scan window are context, not motif.
-"""
-site_start_offset(model::Slim) = left_context(model)

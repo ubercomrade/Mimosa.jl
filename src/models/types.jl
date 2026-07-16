@@ -30,6 +30,8 @@ contract described in `docs/src/extending.md` and ADR 0003:
 """
 abstract type AbstractMotifModel <: AbstractProfileSource end
 
+abstract type AbstractContextModel{T<:AbstractFloat} <: AbstractMotifModel end
+
 """Return whether `model` has a direct sequence-scanning implementation.
 
 This is a transitional compatibility shim. Subtyping

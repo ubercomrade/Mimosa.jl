@@ -816,37 +816,12 @@ function PreparedProfile(
 end
 
 function PreparedProfile(
-    name::String,
-    bundle::StrandPair{<:RaggedArray{Float32}},
-    anchors::Tuple{AnchorCSR,AnchorCSR},
-    min_logfpr::Real,
-)
-    return PreparedProfile(name, bundle, anchors, Float32(min_logfpr))
-end
-
-function PreparedProfile(
-    name::String,
-    bundle::StrandPair{<:RaggedArray{Float32}},
-    anchors::Tuple{AnchorCSR,AnchorCSR},
-)
-    return PreparedProfile(name, bundle, anchors, 0.0f0)
-end
-
-function PreparedProfile(
     name::AbstractString,
     bundle::StrandPair{<:RaggedArray{Float32}},
     anchors::Tuple{AnchorCSR,AnchorCSR},
-    min_logfpr::Real,
+    min_logfpr::Real=0.0f0,
 )
-    return PreparedProfile(String(name), bundle, anchors, min_logfpr)
-end
-
-function PreparedProfile(
-    name::AbstractString,
-    bundle::StrandPair{<:RaggedArray{Float32}},
-    anchors::Tuple{AnchorCSR,AnchorCSR},
-)
-    return PreparedProfile(String(name), bundle, anchors)
+    return PreparedProfile(String(name), bundle, anchors, Float32(min_logfpr))
 end
 
 """

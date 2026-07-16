@@ -505,106 +505,6 @@ function pcm_to_pfm(
 end
 
 """
-    reconstruct_pfm(model::PWM, batch::EncodedSequenceBatch, selector::SiteSelector;
-                    pseudocount=0.25f0, strands=BothStrands(),
-                    execution=SerialExecution())
-
-Reconstruct a PFM from binding sites extracted by `selector`.
-
-Returns a `Matrix{Float32}` of shape `(4, motif_width)`.
-"""
-function reconstruct_pfm(
-    model::PWM,
-    batch::EncodedSequenceBatch,
-    selector::SiteSelector;
-    pseudocount::Float32=0.25f0,
-    strands::StrandPolicy=BothStrands(),
-    execution::ExecutionPolicy=SerialExecution(),
-)
-    validate_model(model; capability=:sites)
-    coll = _collect_hits(model, batch, selector; strands=strands, execution=execution)
-
-    if isempty(coll)
-        throw(ArgumentError("No sites found for PFM reconstruction."))
-    end
-
-    motif_width = length(model)
-    sites = extract_site_matrix(batch, coll, motif_width)
-    pcm = build_pcm(sites, motif_width)
-    return pcm_to_pfm(pcm; pseudocount=pseudocount)
-end
-
-"""
-    reconstruct_pfm(model::PWM, batch::EncodedSequenceBatch;
-                    mode::Symbol=:best, pseudocount::Float32=0.25f0,
-                    strands::StrandPolicy=BothStrands(),
-                    score_threshold::Union{Nothing,Float32}=nothing,
-                    top_fraction::Union{Nothing,Float64}=nothing)
-
-Convenience method for PFM reconstruction with keyword-based selection mode.
-"""
-function reconstruct_pfm(
-    model::PWM,
-    batch::EncodedSequenceBatch;
-    mode::Symbol=:best,
-    pseudocount::Float32=0.25f0,
-    strands::StrandPolicy=BothStrands(),
-    score_threshold::Union{Nothing,Float32}=nothing,
-    top_fraction::Union{Nothing,Float64}=nothing,
-    execution::ExecutionPolicy=SerialExecution(),
-)
-    selector = _resolve_selector(mode; score_threshold=score_threshold)
-    if top_fraction !== nothing
-        selector = TopFractionHits(top_fraction)
-    end
-
-    return reconstruct_pfm(
-        model,
-        batch,
-        selector;
-        pseudocount=pseudocount,
-        strands=strands,
-        execution=execution,
-    )
-end
-
-# ── Public selectsites API ────────────────────────────────────────────────
-
-"""
-    selectsites(model::PWM, batch::EncodedSequenceBatch, selector::SiteSelector;
-                strands=BothStrands(), execution=SerialExecution())
-
-Extract motif binding sites from sequences using the given selector.
-
-Returns a sorted [`SiteCollection`](@ref).
-"""
-function selectsites(
-    model::PWM,
-    batch::EncodedSequenceBatch,
-    selector::SiteSelector;
-    strands::StrandPolicy=BothStrands(),
-    execution::ExecutionPolicy=SerialExecution(),
-)
-    validate_model(model; capability=:sites)
-    coll = _collect_hits(model, batch, selector; strands=strands, execution=execution)
-    sort_hits!(coll)
-    return coll
-end
-
-# ── Internal hit collection dispatch ─────────────────────────────────────
-
-function _collect_hits(
-    model::PWM,
-    batch::EncodedSequenceBatch,
-    selector::SiteSelector;
-    strands::StrandPolicy=BothStrands(),
-    execution::ExecutionPolicy=SerialExecution(),
-)
-    bundle = _scan_bundle_for_sites(model, batch, strands, execution)
-    return _collect_hits_from_bundle(selector, bundle, strands)
-end
-
-"""
     _empty_ragged_like(rag::RaggedArray{T}) where T
 
 Return a `RaggedArray{T}` with the same number of rows but all empty (zero-length).
@@ -612,32 +512,6 @@ Return a `RaggedArray{T}` with the same number of rows but all empty (zero-lengt
 function _empty_ragged_like(rag::RaggedArray{T}) where {T}
     n = nrows(rag)
     return RaggedArray(Vector{T}(), fill(1, n + 1))
-end
-
-"""
-    _scan_bundle_for_sites(model::PWM, batch::EncodedSequenceBatch, strands::StrandPolicy)
-
-Scan the minimum required strand set and return a `StrandPair{RaggedArray{Float32}}`.
-"""
-function _scan_bundle_for_sites(
-    model::PWM,
-    batch::EncodedSequenceBatch,
-    strands::StrandPolicy,
-    execution::ExecutionPolicy=SerialExecution(),
-)
-    if strands isa ForwardOnly
-        fwd = _scan_model_batch(model, batch; strands=ForwardOnly(), execution=execution)
-        rev = _empty_ragged_like(fwd)
-        return StrandPair(fwd, rev)
-    elseif strands isa ReverseOnly
-        rev = _scan_model_batch(model, batch; strands=ReverseOnly(), execution=execution)
-        fwd = _empty_ragged_like(rev)
-        return StrandPair(fwd, rev)
-    else
-        # BothStrands and BestStrand both need both tracks
-        result = _scan_model_batch(model, batch; strands=BothStrands(), execution=execution)
-        return result
-    end
 end
 
 # ── Generic AbstractMotifModel support (Extensibility API Plan §7.2) ─────────

@@ -252,11 +252,9 @@ end
 # and stores its scoring matrix in the `representation` field.
 # Score loops use precomputed rolling k-mer codes.
 
-scorematrix(model::PWM) = model.representation
-scorematrix(model::BaMM) = model.representation
-scorematrix(model::SiteGA) = model.representation
-scorematrix(model::Dimont) = model.representation
-scorematrix(model::Slim) = model.representation
+const BuiltinRollingModel = Union{PWM,BaMM,SiteGA,Dimont,Slim}
+
+scorematrix(model::BuiltinRollingModel) = model.representation
 
 function _rolling_kmer_scan_kernel!(
     forward::AbstractVector{Float32},
@@ -278,13 +276,15 @@ function _rolling_kmer_scan_kernel!(
     )
 end
 
-#! format: off
-scan_kernel!(f::AbstractVector{Float32}, r::AbstractVector{Float32}, model::PWM, seq::AbstractVector{UInt8}, n::Int) = _rolling_kmer_scan_kernel!(f, r, model, seq, n)
-scan_kernel!(f::AbstractVector{Float32}, r::AbstractVector{Float32}, model::BaMM, seq::AbstractVector{UInt8}, n::Int) = _rolling_kmer_scan_kernel!(f, r, model, seq, n)
-scan_kernel!(f::AbstractVector{Float32}, r::AbstractVector{Float32}, model::SiteGA, seq::AbstractVector{UInt8}, n::Int) = _rolling_kmer_scan_kernel!(f, r, model, seq, n)
-scan_kernel!(f::AbstractVector{Float32}, r::AbstractVector{Float32}, model::Dimont, seq::AbstractVector{UInt8}, n::Int) = _rolling_kmer_scan_kernel!(f, r, model, seq, n)
-scan_kernel!(f::AbstractVector{Float32}, r::AbstractVector{Float32}, model::Slim, seq::AbstractVector{UInt8}, n::Int) = _rolling_kmer_scan_kernel!(f, r, model, seq, n)
-#! format: on
+function scan_kernel!(
+    forward::AbstractVector{Float32},
+    reverse::AbstractVector{Float32},
+    model::BuiltinRollingModel,
+    sequence::AbstractVector{UInt8},
+    n_positions::Int,
+)
+    return _rolling_kmer_scan_kernel!(forward, reverse, model, sequence, n_positions)
+end
 
 # ── Generic single-sequence scan kernels ──────────────────────────────────
 #

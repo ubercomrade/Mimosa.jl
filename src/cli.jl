@@ -313,14 +313,6 @@ function _json_value(v::AbstractVector)
     return "[" * join(parts, ", ") * "]"
 end
 
-function _json_value(v::AbstractVector{<:AbstractFloat})
-    if isempty(v)
-        return "[]"
-    end
-    parts = [_json_float(Float64(x)) for x in v]
-    return "[" * join(parts, ", ") * "]"
-end
-
 function _json_dict(d::Dict{String})
     keys_sorted = sort!(collect(keys(d)))
     parts = String[]

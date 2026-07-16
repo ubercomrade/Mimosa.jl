@@ -92,93 +92,11 @@ end
     @test_throws MimosaError read_sitega("nonexistent.mat")
 end
 
-@testset "SiteGA scanning single sequence" begin
-    path = joinpath(SITEGA_FIXTURES, "sitega_gata2.mat")
-    m = read_sitega(path)
-
-    # Create a test sequence (longer than window_size = motif_length = 12)
-    seq = UInt8[0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
-    n_pos = npositions(m, length(seq))
-    @test n_pos == 20 - 12 + 1  # seq_len - window_size + 1
-
-    # Forward scan
-    fwd = scan(m, seq; strands=ForwardOnly())
-    @test length(fwd) == n_pos
-    @test all(isfinite, fwd)
-
-    # Reverse scan
-    rev = scan(m, seq; strands=ReverseOnly())
-    @test length(rev) == n_pos
-    @test all(isfinite, rev)
-
-    # Best strand
-    best = scan(m, seq; strands=BestStrand())
-    @test length(best) == n_pos
-    @test all(best .>= min.(fwd, rev))
-
-    # Both strands
-    both = scan(m, seq; strands=BothStrands())
-    @test both.forward ≈ fwd
-    @test both.reverse ≈ rev
-
-    # In-place scan
-    dest = Vector{Float32}(undef, n_pos)
-    scan!(dest, m, seq; strands=ForwardOnly())
-    @test dest ≈ fwd
-
-    # Short sequence (shorter than window_size)
-    short_seq = UInt8[0, 1, 2, 3]
-    fwd_short = scan(m, short_seq; strands=ForwardOnly())
-    @test isempty(fwd_short)
-end
-
-@testset "SiteGA scanning batch" begin
-    path = joinpath(SITEGA_FIXTURES, "sitega_gata2.mat")
-    m = read_sitega(path)
-
-    # Build a batch
-    seqs = [
-        UInt8[0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3],
-        UInt8[3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0],
-        UInt8[0, 0, 0, 0],
-    ]
-    batch = EncodedSequenceBatch(seqs)
-
-    # Forward scan
-    scores = scan(m, batch; strands=ForwardOnly())
-    @test nrows(scores) == 3
-    @test rowlength(scores, 1) == 20 - 12 + 1  # window=12
-    @test rowlength(scores, 3) == 0  # short sequence
-
-    # Both strands
-    both = scan(m, batch; strands=BothStrands())
-    @test nrows(both.forward) == 3
-    @test nrows(both.reverse) == 3
-
-    # Best strand
-    best = scan(m, batch; strands=BestStrand())
-    @test nrows(best) == 3
-
-    # Scan result lengths
-    lens = Mimosa.scan_result_lengths(m, batch)
-    @test length(lens) == 3
-    @test lens[1] == 20 - 12 + 1
-    @test lens[3] == 0
-end
-
-@testset "SiteGA scan determinism" begin
-    path = joinpath(SITEGA_FIXTURES, "sitega_gata2.mat")
-    m = read_sitega(path)
-    seq = UInt8[0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
-
-    s1 = scan(m, seq; strands=ForwardOnly())
-    s2 = scan(m, seq; strands=ForwardOnly())
-    @test s1 == s2
-
-    # Non-mutation: scanning should not modify the model or sequence
-    seq_copy = copy(seq)
-    scan(m, seq; strands=ForwardOnly())
-    @test seq == seq_copy
+@testset "SiteGA scanning contract" begin
+    model = read_sitega(joinpath(SITEGA_FIXTURES, "sitega_gata2.mat"))
+    sequence = UInt8[0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
+    _test_scan_contract(model, sequence)
+    _test_batch_scan_contract(model, (sequence, reverse(sequence)))
 end
 
 @testset "SiteGA write round-trip" begin

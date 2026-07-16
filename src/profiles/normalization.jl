@@ -23,6 +23,43 @@ the lookup table. Matches Python's `build_score_log_tail_table`.
 """
 struct EmpiricalLogTail end
 
+function _fit_empirical!(
+    scores::AbstractVector{Float32},
+    normalized::Union{Nothing,AbstractVector{Float32}}=nothing,
+)
+    n = length(scores)
+    n == 0 && return LogTailTable(Float32[0.0f0], Float32[0.0f0])
+
+    perm = sortperm(scores; rev=true)
+    n_unique = 1
+    @inbounds for k in 2:n
+        n_unique += scores[perm[k]] != scores[perm[k - 1]]
+    end
+
+    unique_scores = Vector{Float32}(undef, n_unique)
+    log_tail = Vector{Float32}(undef, n_unique)
+    group = 1
+    k = 1
+    @inbounds while k <= n
+        score = scores[perm[k]]
+        unique_scores[group] = score
+        j = k + 1
+        while j <= n && scores[perm[j]] == score
+            j += 1
+        end
+        value = Float32(-log10(Float64(j - 1) / Float64(n)))
+        log_tail[group] = value
+        if normalized !== nothing
+            for p in k:(j - 1)
+                normalized[perm[p]] = value
+            end
+        end
+        group += 1
+        k = j
+    end
+    return LogTailTable(unique_scores, log_tail)
+end
+
 """
     fit(::EmpiricalLogTail, scores::AbstractVector)
 
@@ -35,81 +72,12 @@ Algorithm (matching Python's `build_score_log_tail_table`):
 4. Transform to `-log10(tail_probability)`.
 """
 function fit(::EmpiricalLogTail, scores::AbstractVector{T}) where {T<:Real}
-    n = length(scores)
-    n == 0 && return LogTailTable(Float32[0.0f0], Float32[0.0f0])
-
-    # Collect and sort descending
-    flat = Float32[float(s) for s in scores]
-    sort!(flat; rev=true)
-
-    # Count unique scores in descending order.
-    n_unique = 1
-    @inbounds for i in 2:n
-        if flat[i] != flat[i - 1]
-            n_unique += 1
-        end
-    end
-
-    unique_scores = Vector{Float32}(undef, n_unique)
-    unique_scores[1] = flat[1]
-    j = 1
-    @inbounds for i in 2:n
-        if flat[i] != unique_scores[j]
-            j += 1
-            unique_scores[j] = flat[i]
-        end
-    end
-
-    # Cumulative counts → tail probabilities → -log10
-    log_tail = Vector{Float32}(undef, n_unique)
-    cum = 0
-    group_start = 1
-    @inbounds for i in 1:n_unique
-        while group_start <= n && flat[group_start] == unique_scores[i]
-            cum += 1
-            group_start += 1
-        end
-        log_tail[i] = Float32(-log10(Float64(cum) / Float64(n)))
-    end
-
-    return LogTailTable(unique_scores, log_tail)
+    return _fit_empirical!(Float32[float(score) for score in scores])
 end
 
 function _fit_transform_empirical(scores::RaggedArray{Float32})
-    n = length(scores.data)
-    n == 0 && return (
-        LogTailTable(Float32[0.0f0], Float32[0.0f0]),
-        RaggedArray(Float32[], copy(scores.offsets)),
-    )
-
-    perm = sortperm(scores.data; rev=true)
-    n_unique = 1
-    @inbounds for k in 2:n
-        n_unique += scores.data[perm[k]] != scores.data[perm[k - 1]]
-    end
-    unique_scores = Vector{Float32}(undef, n_unique)
-    log_tail = Vector{Float32}(undef, n_unique)
-    normalized = Vector{Float32}(undef, n)
-    group = 1
-    cum = 0
-    k = 1
-    @inbounds while k <= n
-        score = scores.data[perm[k]]
-        unique_scores[group] = score
-        j = k
-        while j <= n && scores.data[perm[j]] == score
-            j += 1
-        end
-        cum = j - 1
-        value = Float32(-log10(Float64(cum) / Float64(n)))
-        log_tail[group] = value
-        for p in k:(j - 1)
-            normalized[perm[p]] = value
-        end
-        group += 1
-        k = j
-    end
-    table = LogTailTable(unique_scores, log_tail)
+    normalized = similar(scores.data)
+    table = _fit_empirical!(scores.data, normalized)
     return table, RaggedArray(normalized, copy(scores.offsets))
 end
 
@@ -128,49 +96,16 @@ function _fit_transform_empirical(bundle::StrandPair{<:RaggedArray{Float32}})
 
     n_forward = length(bundle.forward.data)
     n_reverse = length(bundle.reverse.data)
-    n = n_forward + n_reverse
-    if n == 0
-        empty_table = LogTailTable(Float32[0.0f0], Float32[0.0f0])
-        empty_forward = RaggedArray(Float32[], copy(bundle.forward.offsets))
-        empty_reverse = RaggedArray(Float32[], copy(bundle.reverse.offsets))
-        return empty_table, StrandPair(empty_forward, empty_reverse)
-    end
+    flat = [bundle.forward.data; bundle.reverse.data]
+    normalized = similar(flat)
+    table = _fit_empirical!(flat, normalized)
 
-    flat = Vector{Float32}(undef, n)
-    copyto!(flat, 1, bundle.forward.data, 1, n_forward)
-    copyto!(flat, n_forward + 1, bundle.reverse.data, 1, n_reverse)
-    perm = sortperm(flat; rev=true)
-
-    n_unique = 1
-    @inbounds for k in 2:n
-        n_unique += flat[perm[k]] != flat[perm[k - 1]]
-    end
-    unique_scores = Vector{Float32}(undef, n_unique)
-    log_tail = Vector{Float32}(undef, n_unique)
-    normalized = Vector{Float32}(undef, n)
-    group = 1
-    k = 1
-    @inbounds while k <= n
-        score = flat[perm[k]]
-        unique_scores[group] = score
-        j = k + 1
-        while j <= n && flat[perm[j]] == score
-            j += 1
-        end
-        value = Float32(-log10(Float64(j - 1) / Float64(n)))
-        log_tail[group] = value
-        for p in k:(j - 1)
-            normalized[perm[p]] = value
-        end
-        group += 1
-        k = j
-    end
-
-    forward_data = @view normalized[1:n_forward]
-    reverse_data = @view normalized[(n_forward + 1):n]
-    forward = RaggedArray(forward_data, copy(bundle.forward.offsets))
-    reverse = RaggedArray(reverse_data, copy(bundle.reverse.offsets))
-    return LogTailTable(unique_scores, log_tail), StrandPair(forward, reverse)
+    forward = RaggedArray(@view(normalized[1:n_forward]), copy(bundle.forward.offsets))
+    reverse = RaggedArray(
+        @view(normalized[(n_forward + 1):(n_forward + n_reverse)]),
+        copy(bundle.reverse.offsets),
+    )
+    return table, StrandPair(forward, reverse)
 end
 
 """

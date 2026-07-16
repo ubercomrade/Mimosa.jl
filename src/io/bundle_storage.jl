@@ -643,18 +643,6 @@ function _read_npy_array(
     end
 end
 
-function _read_npy_f32_2d(
-    path::AbstractString; expected_shape::Union{Nothing,AbstractVector{<:Integer}}=nothing
-)
-    return _read_npy_array(
-        path;
-        expected_dtype="<f4",
-        expected_shape=expected_shape,
-        expected_rank=2,
-        expected_fortran_order=false,
-    )
-end
-
 function _read_npy_f64(
     path::AbstractString; expected_shape::Union{Nothing,AbstractVector{<:Integer}}=nothing
 )
@@ -705,24 +693,6 @@ function _npy_header(dtype::AbstractString, shape::AbstractVector{<:Integer})
     ncodeunits(header) <= MAX_NPY_HEADER_BYTES ||
         throw(InvariantError("NPY header exceeds the configured size limit."))
     return header
-end
-
-function _write_npy_2d(path::AbstractString, data::AbstractMatrix{<:AbstractFloat})
-    nrows, ncols = size(data)
-    header = _npy_header("<f4", [nrows, ncols])
-    open(path, "w") do io
-        write(io, _NPY_MAGIC, UInt8(1), UInt8(0))
-        _write_u16le(io, ncodeunits(header))
-        write(io, header)
-        for row in 1:nrows, column in 1:ncols
-            value = Float32(data[row, column])
-            isfinite(value) ||
-                throw(InvariantError("model value cannot be represented as Float32."))
-            write(io, htol(value))
-        end
-        return flush(io)
-    end
-    return nothing
 end
 
 function _write_npy(path::AbstractString, data::Vector{Float64})
