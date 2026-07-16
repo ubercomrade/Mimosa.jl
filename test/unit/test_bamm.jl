@@ -22,7 +22,7 @@ const BAMM_FIXTURES = joinpath(@__DIR__, "..", "fixtures")
     @test size(m1.representation) == (25, 3)
     @test Mimosa.kmer(m1) == 2
     @test Mimosa.context_length(m1) == 1
-    @test Mimosa.window_size(m1) == 4
+    @test Mimosa.window_size(m1) == 5
 
     # Invalid: wrong row count
     @test_throws MimosaError BaMM("bad", Matrix{Float32}(undef, 4, 3), 0, 3)
@@ -119,10 +119,10 @@ end
     path = joinpath(BAMM_FIXTURES, "myog.ihbcp")
     m1 = read_bamm(path; order=1)
 
-    # Create a simple test sequence (longer than window_size = 14 + 1 = 15)
+    # Create a simple test sequence (longer than window_size = 14 + 2 * 1 = 16)
     seq = UInt8[0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3]
     n_pos = npositions(m1, length(seq))
-    @test n_pos == 20 - 15 + 1  # seq_len - window_size + 1
+    @test n_pos == 20 - 16 + 1  # seq_len - window_size + 1
 
     # Forward scan
     fwd = scan(m1, seq; strands=ForwardOnly())
@@ -177,7 +177,7 @@ end
     # Forward scan order=1
     scores1 = scan(m1, batch; strands=ForwardOnly())
     @test nrows(scores1) == 3
-    @test rowlength(scores1, 1) == 20 - 15 + 1  # order=1: window=15
+    @test rowlength(scores1, 1) == 20 - 16 + 1  # order=1: window=16
     @test rowlength(scores1, 3) == 0  # short sequence
 
     # Both strands
@@ -192,7 +192,7 @@ end
     # Scan result lengths
     lens = Mimosa.scan_result_lengths(m1, batch)
     @test length(lens) == 3
-    @test lens[1] == 20 - 15 + 1
+    @test lens[1] == 20 - 16 + 1
     @test lens[3] == 0
 end
 

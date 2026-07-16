@@ -1,9 +1,8 @@
 # Characterization tests for the model geometry contract (ADR 0003).
 #
 # These tests pin the public geometry formulas for all five built-in model
-# families before the extensibility API migration. They must keep passing
-# unchanged through Stages 1-5: the migration is only allowed to *provide*
-# these formulas, not to alter existing results.
+# families. Context models use the symmetric geometry contract introduced for
+# consistent forward/reverse physical motif intervals.
 
 using Test
 using Mimosa
@@ -30,6 +29,7 @@ function _check_geometry_identities(model::AbstractMotifModel, name::AbstractStr
     @test rc >= 0
     @test window_size(model) == lc + ml + rc
     @test site_start_offset(model) == lc
+    @test_throws ArgumentError npositions(model, -1)
     @test npositions(model, 0) == 0
     @test npositions(model, window_size(model) - 1) == 0
     @test npositions(model, window_size(model)) == 1
@@ -66,8 +66,8 @@ end
     bamm = readmodel(joinpath(EXAMPLES, "foxa2.ihbcp"))
     @test motif_length(bamm) == bamm.motif_length
     @test left_context(bamm) == bamm.order
-    @test right_context(bamm) == 0
-    @test window_size(bamm) == bamm.motif_length + bamm.order
+    @test right_context(bamm) == bamm.order
+    @test window_size(bamm) == bamm.motif_length + 2 * bamm.order
     @test site_start_offset(bamm) == bamm.order
 
     sitega = SiteGA("sitega", reshape(Float32.(1:100), 25, 4), 4)
@@ -80,21 +80,21 @@ end
     dimont = Dimont("dimont", reshape(Float32.(1:75), 25, 3), 1, 3)
     @test motif_length(dimont) == dimont.motif_length
     @test left_context(dimont) == dimont.span
-    @test right_context(dimont) == 0
-    @test window_size(dimont) == dimont.motif_length + dimont.span
+    @test right_context(dimont) == dimont.span
+    @test window_size(dimont) == dimont.motif_length + 2 * dimont.span
     @test site_start_offset(dimont) == dimont.span
 
     slim = Slim("slim", reshape(Float32.(1:75), 25, 3), 1, 3)
     @test motif_length(slim) == slim.motif_length
     @test left_context(slim) == slim.span
-    @test right_context(slim) == 0
-    @test window_size(slim) == slim.motif_length + slim.span
+    @test right_context(slim) == slim.span
+    @test window_size(slim) == slim.motif_length + 2 * slim.span
     @test site_start_offset(slim) == slim.span
 end
 
 # ── Scan-result invariants must remain stable ──────────────────────────────
 
-@testset "ADR 0003: built-in scan result lengths unchanged" begin
+@testset "ADR 0003: built-in scan result lengths follow geometry" begin
     pwm = readmodel(joinpath(EXAMPLES, "pif4.meme"))
     bamm = readmodel(joinpath(EXAMPLES, "foxa2.ihbcp"))
     seq = UInt8[0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4]

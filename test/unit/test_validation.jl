@@ -8,6 +8,25 @@ using Random
 const REPO_ROOT = dirname(dirname(@__DIR__))
 const EXAMPLES = joinpath(REPO_ROOT, "examples")
 
+struct LegacyBestModel <: AbstractMotifModel end
+
+Mimosa.modelname(::LegacyBestModel) = "legacy-best"
+Mimosa.motif_length(::LegacyBestModel) = 1
+function Mimosa.scan_kernel!(forward, reverse, ::LegacyBestModel, sequence, n_positions)
+    fill!(forward, 1.0f0)
+    fill!(reverse, 2.0f0)
+    return (forward, reverse)
+end
+function Mimosa.best_hits!(
+    dest::AbstractVector{T},
+    ::LegacyBestModel,
+    sequence::AbstractVector{UInt8},
+    n_positions::Int,
+) where {T<:AbstractFloat}
+    fill!(dest, 42.0f0)
+    return dest
+end
+
 # ── B2: EncodedSequenceBatch code validation ──────────────────────────────
 
 @testset "B2: EncodedSequenceBatch rejects invalid codes" begin
@@ -93,11 +112,20 @@ end
     dest = Vector{Float32}(undef, n_pos)
     @test_nowarn scan_forward!(dest, pwm, seq, n_pos)
     @test_nowarn scan_reverse!(dest, pwm, seq, n_pos)
+    @test_nowarn scan_best_strand!(dest, pwm, seq, n_pos)
+    preferred_best = copy(dest)
     @test_nowarn best_hits!(dest, pwm, seq, n_pos)
+    @test dest == preferred_best
 
     fwd = Vector{Float32}(undef, n_pos)
     rev = Vector{Float32}(undef, n_pos)
     @test_nowarn scan_both!(fwd, rev, pwm, seq, n_pos)
+    mixed_rev = Vector{Float64}(undef, n_pos)
+    @test_nowarn scan_both!(fwd, mixed_rev, pwm, seq, n_pos)
+    @test mixed_rev == rev
+    mixed_fwd = Vector{Float64}(undef, n_pos)
+    @test_nowarn scan_both!(mixed_fwd, rev, pwm, seq, n_pos)
+    @test mixed_fwd == fwd
 
     # Short destination should throw.
     short_dest = Vector{Float32}(undef, max(n_pos - 1, 0))
@@ -116,6 +144,9 @@ end
     # Invalid codes and inconsistent geometry must not reach @inbounds kernels.
     @test_throws ArgumentError scan_forward!(dest, pwm, UInt8[0xff for _ in seq], n_pos)
     @test_throws ArgumentError scan_forward!(dest, pwm, seq, n_pos + 1)
+    @test_throws ArgumentError scan_reverse!(dest, pwm, seq, n_pos - 1)
+    @test_throws ArgumentError scan_best_strand!(dest, pwm, seq, n_pos - 1)
+    @test_throws ArgumentError scan_both!(fwd, rev, pwm, seq, n_pos - 1)
     @test_throws ArgumentError scan_both!(fwd, fwd, pwm, seq, n_pos)
 
     # Negative n_pos should throw.
@@ -144,6 +175,31 @@ end
 
     # Negative n_pos.
     @test_throws ArgumentError scan_forward!(dest, model, seq, -1)
+end
+
+@testset "B2: order-1 symmetric physical window alignment" begin
+    score_matrix = zeros(Float32, 25, 2)
+    score_matrix[:, 1] .= Float32.(0:24)
+    score_matrix[:, 2] .= Float32.(100:124)
+    model = Dimont("window-alignment", score_matrix, 1, 2)
+    seq = UInt8[0, 1, 3, 2, 0, 1]
+
+    both = scan(model, seq; strands=BothStrands())
+    @test both.forward == Float32[109, 125, 127]
+    @test both.reverse == Float32[107, 121, 129]
+
+    batch = EncodedSequenceBatch([seq])
+    hits = SiteCollection([1, 1], [1, 1], Int8[0, 1], Float32[109, 107])
+    extracted = extract_site_matrix(
+        batch, hits, motif_length(model); site_offset=site_start_offset(model)
+    )
+    @test extracted[:, 1] == UInt8[1, 3]
+    @test extracted[:, 2] == UInt8[0, 2]
+end
+
+@testset "B2: legacy best_hits! specialization remains active" begin
+    seq = UInt8[0, 1, 2]
+    @test scan(LegacyBestModel(), seq; strands=BestStrand()) == fill(42.0f0, 3)
 end
 
 @testset "B2: higher-order strand APIs agree" begin

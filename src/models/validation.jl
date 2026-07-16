@@ -34,9 +34,9 @@ buffers, and must write exactly `n_positions` elements to each buffer.
 
 Canonical scanning value type is `Float32`.
 
-Specialized `scan_forward!`, `scan_reverse!`, `best_hits!`, or
-`scan_both!` methods may be added as performance overrides, but custom
-models must still implement this kernel as their portable scan
+Specialized `scan_forward!`, `scan_reverse!`, `scan_best_strand!` (or legacy
+`best_hits!`), or `scan_both!` methods may be added as performance overrides,
+but custom models must still implement this kernel as their portable scan
 capability.
 """
 function scan_kernel! end
@@ -65,7 +65,7 @@ end
 #
 # This wrapper calls model code after the public scanning boundary has
 # validated inputs. It enforces the kernel return-value contract and is
-# used by `scan_both!`/`scan_forward!`/`scan_reverse!`/`best_hits!`
+# used by the public strand scanning functions
 # defined in `scanning/n_order_scan.jl`.
 
 function _scan_kernel_safe!(

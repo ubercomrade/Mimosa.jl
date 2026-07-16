@@ -139,8 +139,8 @@ end
 
 Return a hex-encoded SHA-256 fingerprint of a motif model's content.
 The fingerprint incorporates the model type, name, representation, and
-background (for PWM). Built-in models keep their byte-stable
-representations and cache keys.
+background (for PWM). Context-model fingerprints also include the geometry
+contract version so incompatible scan semantics cannot reuse cached artifacts.
 """
 function content_fingerprint(model::AbstractMotifModel)
     io = IOBuffer()
@@ -152,10 +152,18 @@ function content_fingerprint(model::AbstractMotifModel)
     return content_fingerprint(take!(io))
 end
 
-# Dispatch on concrete built-in types so the byte representations and
-# cache keys remain bit-stable. The generic `AbstractMotifModel` method
-# above calls `modelname(model)` and `_write_model_fingerprint_body!`,
-# which throws a clear error for unknown custom model types.
+# Dispatch on concrete built-in types so fingerprint changes are explicit. The
+# generic `AbstractMotifModel` method above calls `modelname(model)` and
+# `_write_model_fingerprint_body!`, which throws a clear error for unknown
+# custom model types.
+
+const _CONTEXT_GEOMETRY_FINGERPRINT = ",geometry=symmetric-v1"
+
+function _write_context_geometry_fingerprint!(io::IO, context::Int)
+    context == 0 || write(io, _CONTEXT_GEOMETRY_FINGERPRINT)
+    return nothing
+end
+
 function _write_model_fingerprint_body!(io::IO, model::PWM)
     write(io, content_fingerprint(model.representation))
     write(io, "|")
@@ -166,7 +174,8 @@ function _write_model_fingerprint_body!(io::IO, model::BaMM)
     write(io, content_fingerprint(model.representation))
     write(io, "|")
     write(io, "order=" * string(model.order))
-    return write(io, ",ml=" * string(model.motif_length))
+    write(io, ",ml=" * string(model.motif_length))
+    return _write_context_geometry_fingerprint!(io, model.order)
 end
 
 function _write_model_fingerprint_body!(io::IO, model::SiteGA)
@@ -183,14 +192,16 @@ function _write_model_fingerprint_body!(io::IO, model::Dimont)
     write(io, content_fingerprint(model.representation))
     write(io, "|")
     write(io, "span=" * string(model.span))
-    return write(io, ",ml=" * string(model.motif_length))
+    write(io, ",ml=" * string(model.motif_length))
+    return _write_context_geometry_fingerprint!(io, model.span)
 end
 
 function _write_model_fingerprint_body!(io::IO, model::Slim)
     write(io, content_fingerprint(model.representation))
     write(io, "|")
     write(io, "span=" * string(model.span))
-    return write(io, ",ml=" * string(model.motif_length))
+    write(io, ",ml=" * string(model.motif_length))
+    return _write_context_geometry_fingerprint!(io, model.span)
 end
 
 function _write_model_fingerprint_body!(io::IO, model::AbstractMotifModel)

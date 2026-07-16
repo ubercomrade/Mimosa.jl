@@ -24,7 +24,7 @@ Use `writemodel(path, model)` and `readmodel(path)`.
 
 ## Null Bundles
 
-Null bundles use format version 3:
+Null bundles use format version 4:
 
 ```text
 null_bundle/
@@ -55,4 +55,5 @@ Writers build a complete sibling staging directory and commit it by rename.
 Failed writes do not replace valid targets; orphan stages are ignored.
 
 Any schema change requires a version increment, compatibility/migration checks,
-tests, and updated documentation.
+tests, and updated documentation. Null-bundle format version 4 intentionally
+rejects all older bundles; rebuild them before reuse.

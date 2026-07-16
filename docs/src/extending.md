@@ -107,10 +107,10 @@ inner loops and worker tasks do not repeat it.
   bundle compatibility tracking. Plain `compare` does not call it. A
   custom model implements it as a stable SHA-256 hex string of all
   parameters that affect scores.
-- Specialized `scan_forward!`/`scan_reverse!`/`best_hits!`/`scan_both!`
-  methods are optional performance overrides; the generic fallback
-  already drives `scan_kernel!` correctly. Add one only after a
-  benchmark justifies it.
+- Specialized `scan_forward!`/`scan_reverse!`/`scan_best_strand!`/`scan_both!`
+  methods are optional performance overrides; the generic fallback already drives
+  `scan_kernel!` correctly. The legacy `best_hits!` name remains compatible. Add
+  an override only after a benchmark justifies it.
 
 ## External score adapter (no `AbstractMotifModel`)
 

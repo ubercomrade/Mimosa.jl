@@ -33,11 +33,12 @@ function modelname end
     left_context(model)::Integer
 
 Return the number of bases preceding the motif site that are needed to
-compute one score. Default `0` for models without upstream context.
+compute one forward-strand score. Default `0` for models without upstream
+context.
 
-Forward and reverse scores at the same scan index share the same
-physical window and the same physical site interval; the reverse kernel
-is responsible for orienting the score.
+Forward and reverse scores at the same scan index share the same physical
+window and motif interval. A context model therefore declares the downstream
+bases needed for reverse scoring through [`right_context`](@ref).
 """
 left_context(model::AbstractMotifModel) = 0
 
@@ -55,10 +56,10 @@ right_context(model::AbstractMotifModel) = 0
 Return the full window size needed to score one scan position:
 `left_context(model) + motif_length(model) + right_context(model)`.
 
-Built-in higher-order models historically provided direct overrides (for
-example `motif_length + order` for BaMM). Those overrides must satisfy
-the identity above; the default implementation here is the formula and
-is preferred for new model types.
+Built-in context models use symmetric physical windows: their left context
+supports forward scoring and their right context supports reverse scoring.
+Concrete overrides must satisfy the identity above; the default formula is
+preferred for new model types.
 """
 function window_size(model::AbstractMotifModel)
     left = Int(left_context(model))
@@ -73,11 +74,11 @@ end
 Return the number of scan positions in a sequence of length
 `sequence_length`: `max(sequence_length - window_size(model) + 1, 0)`.
 
-Returns zero for empty or too-short sequences.
+Returns zero for empty or too-short sequences. Throws `ArgumentError` for a
+negative sequence length.
 """
 function npositions(model::AbstractMotifModel, sequence_length::Int)
-    ws = window_size(model)
-    return sequence_length < ws ? 0 : sequence_length - ws + 1
+    return npositions(sequence_length, window_size(model))
 end
 
 """
@@ -94,7 +95,7 @@ site_start_offset(model::AbstractMotifModel) = Int(left_context(model))
 # `model_fingerprint` is the public capability used by cache and null
 # bundles. It is *not* required for plain `compare`. The default method
 # delegates to the existing content-based fingerprint via the storage
-# layer; built-in types keep their byte-stable representations.
+# layer; built-in fingerprints change when score-affecting contracts change.
 
 """
     model_fingerprint(model)::String
@@ -103,8 +104,8 @@ Return a stable SHA-256 hex string for `model`. Required only when the
 model participates in cache keys or null-distribution compatibility
 tracking; plain `compare` does not call this method.
 
-Built-in models keep their existing byte representations and cache keys.
-A custom model implements this method only if it needs cache or null
-capabilities.
+Built-in fingerprints are stable within a scoring contract and change when
+score-affecting contracts change. A custom model implements this method only if
+it needs cache or null capabilities.
 """
 function model_fingerprint end

@@ -18,10 +18,10 @@
 #   Row indexing: code = b[1] * 5^span + b[2] * 5^(span-1) + ... + b[span+1] * 5^0
 #
 # Scanning geometry (identical to BaMM/Dimont with order=span):
-#   kmer       = span + 1          (bases per scoring term)
-#   context    = span              (bases before motif start used for context)
-#   window     = motif_len + span  (total sequence window needed)
-#   n_terms    = motif_len         (number of scoring terms per window)
+#   kmer       = span + 1              (bases per scoring term)
+#   context    = span                  (bases on either side of the motif)
+#   window     = motif_len + 2 * span  (symmetric physical window)
+#   n_terms    = motif_len             (number of scoring terms per window)
 #   n_positions = seq_len - window + 1
 
 """
@@ -77,7 +77,8 @@ Base.isapprox(a::Slim, b::Slim; kwargs...) = _context_model_isapprox(a, b; kwarg
 
 # ── Extensibility API (ADR 0003) ──────────────────────────────────────────────
 #
-# Slim uses `span` bases preceding the motif site as context. The site
-# spans `motif_length` positions; there is no downstream context.
+# Slim needs `span` bases on each side of the physical motif interval:
+# preceding bases for forward scoring and following bases for reverse scoring.
 
 left_context(model::Slim) = model.span
+right_context(model::Slim) = model.span

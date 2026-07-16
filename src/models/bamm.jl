@@ -62,9 +62,9 @@ Base.isapprox(a::BaMM, b::BaMM; kwargs...) = _context_model_isapprox(a, b; kwarg
 
 # ── Extensibility API (ADR 0003) ──────────────────────────────────────────────
 #
-# BaMM uses `order` bases preceding the motif site as context. The site
-# itself spans `motif_length` positions, and there is no downstream
-# context. `context_length` is kept as an internal alias that delegates
-# to `left_context` for the rolling k-mer kernels.
+# BaMM needs `order` bases on each side of the physical motif interval:
+# preceding bases for forward scoring and following bases for reverse scoring.
+# `context_length` remains an internal alias for the rolling k-mer kernels.
 
 left_context(model::BaMM) = model.order
+right_context(model::BaMM) = model.order

@@ -77,10 +77,10 @@ The scanning kernel is shared across model families and parameterized by
 the [public geometry contract](extending.md): `motif_length`, `left_context`,
 and `right_context`. Mimosa.jl derives
 `window_size`, `npositions`, and `site_start_offset` from these.
-For BaMM, Dimont, and Slim, the window includes preceding context
-(`left_context = order/span`); for PWM and SiteGA it equals the motif
-length. `npositions(model, sequence_length)` exposes the resulting
-scan-track length.
+For BaMM, Dimont, and Slim, the window includes symmetric context
+(`left_context = right_context = order/span`) around the motif; for PWM and
+SiteGA it equals the motif length. `npositions(model, sequence_length)` exposes
+the resulting scan-track length.
 
 ## Custom models
 

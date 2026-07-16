@@ -155,13 +155,6 @@ Return the number of PWM scoring terms in one scan window.
 scan_width(model::PWM) = motif_length(model)
 
 """
-    npositions(model::PWM, seq_len)
-
-Return the number of PWM scan positions in a sequence of length `seq_len`.
-"""
-npositions(model::PWM, seq_len::Int) = npositions(seq_len, motif_length(model))
-
-"""
     pfm_to_pwm(pfm; background=0.25)
 
 Convert a Position Frequency Matrix to a log-odds Position Weight Matrix.

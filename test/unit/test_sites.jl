@@ -293,7 +293,7 @@ end
     @test length(model) == 5
 
     # Create a batch with sequences long enough for scanning
-    # window_size = motif_length + order = 6, need seq_len >= 6
+    # window_size = motif_length + 2 * order = 7, need seq_len >= 7
     batch = make_random_sequences(5, 20; seed=42)
 
     # Select sites (best per sequence)

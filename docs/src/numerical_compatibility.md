@@ -49,7 +49,9 @@ destinations before unchecked kernels.
 
 Julia site coordinates are one-based inclusive. CLI coordinates are zero-based
 half-open. Forward and reverse scores at one position refer to the same physical
-window.
+window and motif interval. Built-in context models (BaMM, Dimont, and Slim) use
+symmetric windows: `context + motif_length + context`. This excludes motif
+intervals without complete context on either side.
 
 The public geometry contract (ADR 0003) defines `motif_length`,
 `left_context`, and `right_context` as the only required geometry
@@ -57,10 +59,12 @@ accessors. `window_size`, `npositions`, and `site_start_offset` are
 derived. A custom model implementing `scan_kernel!` produces
 Float32 scan values through the same code path as the built-in
 specialized kernels; the fallback may compute both strands even for a
-single-strand request, but the visible single-strand result is
-identical to the corresponding track of `BothStrands`. Built-in scan
-values, tie-breaking, and coordinate conventions are unchanged by the
-extension API.
+single-strand request, but the visible single-strand result is identical to the
+corresponding track of `BothStrands`. The symmetric-context geometry contract is
+part of nonzero-context model fingerprints, so their older cache entries are
+intentionally incompatible. PWM, SiteGA, and zero-context model fingerprints
+remain stable. Null-bundle format version 4 rejects every older bundle on load;
+all pre-change null bundles must be rebuilt.
 
 ## Reproducibility
 

@@ -97,6 +97,32 @@ end
         end
         @test_throws ModelFormatError loadnull(path)
     end
+
+    gev = GEVFit(0.0, 0.0, 1.0, true, 1, 0.0)
+    dist = NullDistribution(
+        "profile",
+        "co",
+        gev,
+        Float64[1.0],
+        [NullPair("m", "t", 1.0)],
+        1,
+        1,
+        [],
+        nothing,
+        nothing,
+        "none",
+        "none",
+    )
+    mktempdir() do parent
+        path = joinpath(parent, "legacy_null_bundle")
+        savenull(path, dist)
+        manifest_path = joinpath(path, "manifest.toml")
+        manifest = read(manifest_path, String)
+        write(
+            manifest_path, replace(manifest, "format_version = 4" => "format_version = 3")
+        )
+        @test_throws ModelFormatError loadnull(path)
+    end
 end
 
 @testset "Null storage: hostile manifest validation" begin

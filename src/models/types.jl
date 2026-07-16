@@ -23,7 +23,8 @@ contract described in `docs/src/extending.md`:
 - `modelname(model)::AbstractString`
 - `motif_length(model)::Integer`
 - `scan_kernel!(forward, reverse, model, sequence, n_positions)` (or
-  specialized `scan_forward!`/`scan_reverse!`/`scan_both!` methods)
+  specialized `scan_forward!`/`scan_reverse!`/`scan_best_strand!`/`scan_both!`
+  methods)
 
 `left_context` and `right_context` default to zero. `window_size`,
 `npositions`, and `site_start_offset` are derived by Mimosa.jl.

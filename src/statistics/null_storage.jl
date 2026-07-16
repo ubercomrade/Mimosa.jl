@@ -1,6 +1,6 @@
 # Portable null-distribution storage: TOML manifest + NPY binary blobs.
 #
-# Implements the profile-only v2 schema from ADR 0003. The manifest is a TOML file
+# Implements the profile-only portable schema from ADR 0003. The manifest is a TOML file
 # (stdlib, no external dependency) with metadata and array references.
 # Binary data uses the standard NPY format (little-endian Float64).
 #
@@ -14,9 +14,9 @@
     NULL_FORMAT_VERSION
 
 Current version of the portable null-distribution bundle format.
-Value is `3`. Bundles with a different version are rejected on load.
+Value is `4`. Bundles with a different version are rejected on load.
 """
-const NULL_FORMAT_VERSION = 3
+const NULL_FORMAT_VERSION = 4
 
 """
     savenull(path, dist::NullDistribution)

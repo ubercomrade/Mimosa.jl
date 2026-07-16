@@ -237,6 +237,60 @@ end
     @test model_fingerprint(pwm1) != model_fingerprint(pwm4)
 end
 
+@testset "Symmetric context geometry invalidates legacy artifacts" begin
+    function legacy_fingerprint(model, geometry_fields)
+        io = IOBuffer()
+        write(io, string(typeof(model)))
+        write(io, "|")
+        write(io, modelname(model))
+        write(io, "|")
+        write(io, content_fingerprint(model.representation))
+        write(io, "|")
+        write(io, geometry_fields)
+        return content_fingerprint(take!(io))
+    end
+
+    models_and_fields = (
+        (BaMM("bamm", zeros(Float32, 25, 2), 1, 2), "order=1,ml=2"),
+        (Dimont("dimont", zeros(Float32, 25, 2), 1, 2), "span=1,ml=2"),
+        (Slim("slim", zeros(Float32, 25, 2), 1, 2), "span=1,ml=2"),
+    )
+    cache = Cache(mktempdir())
+    for (model, fields) in models_and_fields
+        legacy = legacy_fingerprint(model, fields)
+        current = model_fingerprint(model)
+        @test current != legacy
+        @test cache_key(cache, "scan", current) != cache_key(cache, "scan", legacy)
+
+        legacy_collection = content_fingerprint(legacy)
+        @test model_collection_fingerprint([model]) != legacy_collection
+    end
+
+    zero_context_models_and_fields = (
+        (BaMM("bamm0", zeros(Float32, 5, 2), 0, 2), "order=0,ml=2"),
+        (Dimont("dimont0", zeros(Float32, 5, 2), 0, 2), "span=0,ml=2"),
+        (Slim("slim0", zeros(Float32, 5, 2), 0, 2), "span=0,ml=2"),
+    )
+    for (model, fields) in zero_context_models_and_fields
+        @test model_fingerprint(model) == legacy_fingerprint(model, fields)
+    end
+
+    sitega = SiteGA("sitega", zeros(Float32, 25, 2), 2)
+    @test model_fingerprint(sitega) == legacy_fingerprint(sitega, "ml=2")
+
+    background = (0.25f0, 0.25f0, 0.25f0, 0.25f0)
+    pwm = PWM("pwm", zeros(Float32, 5, 2), background)
+    io = IOBuffer()
+    write(io, string(typeof(pwm)))
+    write(io, "|")
+    write(io, modelname(pwm))
+    write(io, "|")
+    write(io, content_fingerprint(pwm.representation))
+    write(io, "|")
+    write(io, join(string.(pwm.background), ","))
+    @test model_fingerprint(pwm) == content_fingerprint(take!(io))
+end
+
 @testset "ScoreProfile fingerprint" begin
     first = ScoreProfile("same", RaggedArray(Float32[1, 2], [1, 3]))
     second = ScoreProfile("same", RaggedArray(Float32[1, 3], [1, 3]))

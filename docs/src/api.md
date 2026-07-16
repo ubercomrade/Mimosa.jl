@@ -53,6 +53,7 @@ scan
 scan!
 scan_forward!
 scan_reverse!
+scan_best_strand!
 best_hits!
 scan_both!
 scan_result_lengths

@@ -218,13 +218,15 @@ end
     scan!(dest3, pwm, seq; strands=BestStrand())
     @test dest3 == best_alloc
 
-    # Destination too small
+    # Destination size handling
     @test_throws ArgumentError scan!(Vector{Float32}(undef, 1), pwm, seq)
+    oversized = fill(-Inf32, length(fwd_alloc) + 2)
+    scan!(oversized, pwm, seq)
+    @test oversized[1:length(fwd_alloc)] == fwd_alloc
+    @test oversized[(end - 1):end] == fill(-Inf32, 2)
 
     # BothStrands with scan! is not supported
-    @test_throws ArgumentError scan!(
-        Vector{Float32}(undef, 10), pwm, seq; strands=BothStrands()
-    )
+    @test_throws ArgumentError scan!(similar(fwd_alloc), pwm, seq; strands=BothStrands())
 end
 
 @testset "PWM scan batch" begin
