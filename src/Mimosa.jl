@@ -8,7 +8,7 @@ profile-based comparison, site extraction, PFM reconstruction,
 native GEV null distributions, BH FDR, E-values, portable storage bundles,
 content-based cache, serial and threaded parallelism, and a thin CLI adapter.
 
-See `docs/src/architecture.md` and `docs/src/numerical_compatibility.md` for design requirements and compatibility contracts.
+See `docs/src/api.md` and `docs/src/data_layout.md` for usage and coordinate conventions.
 """
 module Mimosa
 
