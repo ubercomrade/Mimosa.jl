@@ -24,11 +24,11 @@ jobs:
         os: [ubuntu-22.04, windows-2022, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1.12'
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - name: Run package tests
         uses: julia-actions/julia-runtest@v1
       - name: Test Pkg app installation
@@ -47,11 +47,11 @@ jobs:
     env:
       JULIA_NUM_THREADS: '4'
     steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1.12'
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - name: Instantiate test environment
         run: julia --project=test -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate()'
       - name: Check formatting
@@ -77,11 +77,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1.12'
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       - name: Build and deploy
         env:
           DOCUMENTER_DEPLOY: 'true'
