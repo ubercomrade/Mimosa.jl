@@ -39,8 +39,7 @@ Downstream custom models subtype `AbstractMotifModel` and implement
 `modelname`, `motif_length`, and `scan_kernel!` (plus
 `left_context`/`right_context` for context models). They must not rely
 on fields named `name`, `representation`, `weights`, `order`, or
-`span`. See [Extending Mimosa](extending.md) and ADR 0003 for the full
-contract.
+`span`. See [Extending Mimosa](extending.md) for the full contract.
 
 The separate package under `test/downstream/` verifies this contract
 using public exports only, including a custom model defined in a separate

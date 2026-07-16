@@ -13,6 +13,12 @@ Fields:
 struct ScoreProfile <: AbstractProfileSource
     name::String
     scores::RaggedArray{Float32}
+
+    function ScoreProfile(name::AbstractString, scores::RaggedArray{Float32})
+        all(isfinite, scores.data) ||
+            throw(ModelFormatError("", "score profile contains non-finite values."))
+        return new(String(name), scores)
+    end
 end
 
 Base.length(profile::ScoreProfile) = nrows(profile.scores)

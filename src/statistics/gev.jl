@@ -15,7 +15,7 @@
 """
     GEVFit
 
-Result of a successful GEV MLE fit.
+Finite, support-valid result of a GEV MLE fit.
 
 Fields:
 - `shape::Float64`: shape parameter `k` (textbook convention, sign flipped from SciPy's `c`).
@@ -310,8 +310,9 @@ end
     fit_gev(scores; max_iter=500, tol=1e-8) -> GEVFitResult
 
 Fit a Generalized Extreme Value distribution to `scores` via maximum
-likelihood. Returns a [`GEVFit`](@ref) on success or a [`GEVFitFailure`](@ref)
-on failure (degenerate sample, non-convergence, non-finite parameters).
+likelihood. Returns a [`GEVFit`](@ref) when finite, support-valid parameters are
+available; inspect its `converged` field for optimizer convergence. Returns a
+[`GEVFitFailure`](@ref) for degenerate samples or invalid parameters.
 
 The shape parameter uses the textbook convention `k` (sign flipped from
 SciPy's `c`): `k = -c`.

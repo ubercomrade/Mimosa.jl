@@ -16,8 +16,9 @@ const SITEGA_FIXTURES = joinpath(@__DIR__, "..", "fixtures")
 
     # Invalid: wrong row count
     @test_throws MimosaError SiteGA("bad", Matrix{Float32}(undef, 24, 3), 3)
-    # Invalid: zero motif length
+    # Invalid: fewer than two positions cannot define a dinucleotide term
     @test_throws MimosaError SiteGA("bad", Matrix{Float32}(undef, 25, 0), 0)
+    @test_throws MimosaError SiteGA("bad", zeros(Float32, 25, 1), 1)
     # Invalid: non-finite values
     bad_rep = Matrix{Float32}(undef, 25, 3)
     fill!(bad_rep, 0.0f0)

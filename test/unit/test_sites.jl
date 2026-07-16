@@ -199,6 +199,17 @@ end
     @test all(isapprox.(col_sums, ones(Float32, 3); atol=Float32(1e-5)))
 end
 
+@testset "reconstruct_pfm composes keyword selectors" begin
+    pwm = PWM("test", Float32[1 1; 0 0; 0 0; 0 0; 0 0], (0.25f0, 0.25f0, 0.25f0, 0.25f0))
+    batch = EncodedSequenceBatch([UInt8[0, 0, 0]])
+
+    by_keywords = reconstruct_pfm(
+        pwm, batch; mode=:threshold, score_threshold=0.0f0, top_fraction=1.0
+    )
+    explicit = reconstruct_pfm(pwm, batch, TopFractionHits(1.0, ThresholdHits(0.0f0)))
+    @test by_keywords == explicit
+end
+
 @testset "Serial/threaded site workflow equivalence" begin
     frequencies = Float32[0.1 0.2 0.3; 0.4 0.1 0.2; 0.3 0.5 0.1; 0.2 0.2 0.4]
     pwm = pwm_from_pfm(frequencies; name="threaded_sites")

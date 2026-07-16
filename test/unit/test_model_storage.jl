@@ -330,3 +330,11 @@ end
         )
     end
 end
+
+@testset "Bundle writes preserve interrupts" begin
+    target = joinpath(mktempdir(), "bundle")
+    @test_throws InterruptException Mimosa._with_bundle_write(target) do _, _
+        throw(InterruptException())
+    end
+    @test !ispath(target)
+end

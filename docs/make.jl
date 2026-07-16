@@ -8,7 +8,7 @@ makedocs(;
     checkdocs=:exports,
     warnonly=[:missing_docs],
     format=Documenter.HTML(;
-        canonical="https://mimosajl.readthedocs.io/en/stable/",
+        canonical="https://ubercomrade.github.io/Mimosa.jl/stable/",
         prettyurls=get(ENV, "CI", nothing) == "true",
         assets=String[],
     ),
@@ -33,4 +33,6 @@ makedocs(;
     ],
 )
 
-deploydocs(; repo="github.com/ubercomrade/Mimosa.jl.git", devbranch="main", push_preview=true)
+if get(ENV, "DOCUMENTER_DEPLOY", "false") == "true"
+    deploydocs(; repo="github.com/ubercomrade/Mimosa.jl.git", devbranch="main")
+end

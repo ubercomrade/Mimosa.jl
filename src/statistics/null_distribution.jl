@@ -484,6 +484,11 @@ function annotate_results(
     pvalues = Vector{Float64}(undef, length(results))
 
     for (idx, result) in enumerate(results)
+        result.metric == dist.metric || throw(
+            ArgumentError(
+                "result metric '$(result.metric)' does not match null metric '$(dist.metric)'.",
+            ),
+        )
         pvalues[idx] = survival(gev, result.score)
     end
 

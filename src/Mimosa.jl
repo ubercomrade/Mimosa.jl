@@ -8,7 +8,7 @@ profile-based comparison, site extraction, PFM reconstruction,
 native GEV null distributions, BH FDR, E-values, portable storage bundles,
 content-based cache, serial and threaded parallelism, and a thin CLI adapter.
 
-See `ARCHITECTURE_REFACTORING_PLAN.md` and `docs/src/numerical_compatibility.md` for design requirements and compatibility contracts.
+See `docs/src/architecture.md` and `docs/src/numerical_compatibility.md` for design requirements and compatibility contracts.
 """
 module Mimosa
 
@@ -91,17 +91,7 @@ export scan,
 
 # Model exports
 export ScoreProfile,
-    BaMM,
-    SiteGA,
-    Dimont,
-    Slim,
-    scorebounds,
-    profile_bundle,
-    site_start_offset,
-    motif_length,
-    window_size,
-    scorematrix,
-    scoretype
+    scorebounds, profile_bundle, motif_length, window_size, scorematrix, scoretype
 export is_scannable
 
 # Sites and PFM reconstruction exports

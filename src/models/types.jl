@@ -18,7 +18,7 @@ Motif models can be scanned against encoded sequences. Precomputed profiles are
 `AbstractProfileSource`s, but are not motif models.
 
 A custom model subtypes `AbstractMotifModel` and implements the minimal
-contract described in `docs/src/extending.md` and ADR 0003:
+contract described in `docs/src/extending.md`:
 
 - `modelname(model)::AbstractString`
 - `motif_length(model)::Integer`

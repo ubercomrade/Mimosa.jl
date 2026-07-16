@@ -753,6 +753,7 @@ function _with_bundle_write(path::AbstractString, writer::F) where {F}
         mv(stage, target)
         return target
     catch err
+        err isa InterruptException && rethrow()
         err isa MimosaError && throw(err)
         throw(
             InvariantError("failed to write bundle '$target': $(sprint(showerror, err)).")

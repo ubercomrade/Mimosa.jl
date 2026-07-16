@@ -27,6 +27,27 @@ end
         model_collection_fingerprint(models)
 end
 
+@testset "null annotation validates metric" begin
+    skipped = NamedTuple{(:query, :reason),Tuple{String,String}}[]
+    fit = GEVFit(0.0, 0.0, 1.0, true, 1, -1.0)
+    dist = NullDistribution(
+        "profile",
+        "co",
+        fit,
+        Float64[0, 1, 2],
+        NullPair[],
+        3,
+        1,
+        skipped,
+        nothing,
+        nothing,
+        "none",
+        "none",
+    )
+    wrong_metric = ComparisonResult("q", "t", 0.5f0, 0, "++", "dice", 1)
+    @test_throws ArgumentError annotate_results([wrong_metric], dist)
+end
+
 @testset "profile null build" begin
     w1 = Float32[0.8 0.1; 0.1 0.8; 0.05 0.05; 0.05 0.05; 0.0 0.0]
     w2 = Float32[0.1 0.8; 0.8 0.1; 0.05 0.05; 0.05 0.05; 0.0 0.0]

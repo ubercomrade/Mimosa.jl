@@ -14,6 +14,7 @@
 #   - Cache is fully disableable (just don't call it).
 #   - `import Mimosa` does not create cache directories or touch the filesystem.
 
+using FileWatching: Pidfile
 using SHA
 using TOML
 
@@ -358,9 +359,8 @@ end
               metadata=Dict{String,Any}())
 
 Write binary data and metadata using a staged sibling directory.
-No-op if the cache is disabled. Each file is committed with an atomic rename;
-an interruption between the two commits leaves a cache miss, never a usable
-partially validated entry.
+No-op if the cache is disabled. A cross-process lock serializes commits and
+clears; the complete entry directory is committed with one atomic rename.
 """
 function cache_set(
     cache::Cache,
@@ -369,16 +369,9 @@ function cache_set(
     metadata::Dict=Dict{String,Any}(),
 )
     path = cache_path(cache, key)
-    meta_path = cache_meta_path(cache, key)
     !cache.enabled && return nothing
 
-    # Create directory lazily
-    isdir(cache.directory) || mkpath(cache.directory)
-
-    # Compute checksum
     checksum = bytes2hex(SHA.sha256(data))
-
-    # Write metadata atomically
     meta = Dict{String,Any}(
         "format_version" => CACHE_FORMAT_VERSION,
         "checksum" => "sha256:$checksum",
@@ -388,36 +381,39 @@ function cache_set(
         name in ("format_version", "checksum", "size") && continue
         meta[name] = value
     end
-    parent = abspath(cache.directory)
-    stage = mktempdir(parent; prefix=".mimosa-cache-stage-", cleanup=false)
-    entry_stage = joinpath(stage, _validate_cache_key(key))
-    mkpath(entry_stage)
-    try
-        staged_path = joinpath(entry_stage, _CACHE_DATA_NAME)
-        staged_meta = joinpath(entry_stage, _CACHE_META_NAME)
-        write(staged_path, data)
-        open(staged_meta, "w") do io
-            return TOML.print(io, meta; sorted=true)
-        end
-        _flush_file(staged_path)
-        _flush_file(staged_meta)
-        target = _cache_entry_dir(cache, key)
-        backup = nothing
-        if ispath(target)
-            backup = target * ".backup-" * string(rand(UInt))
-            mv(target, backup)
-        end
+
+    return _with_cache_lock(cache) do
+        parent = abspath(cache.directory)
+        stage = mktempdir(parent; prefix=".mimosa-cache-stage-", cleanup=false)
+        entry_stage = joinpath(stage, _validate_cache_key(key))
+        mkpath(entry_stage)
         try
-            mv(entry_stage, target)
-            backup !== nothing && rm(backup; recursive=true, force=true)
-        catch
-            ispath(target) && rm(target; recursive=true, force=true)
-            backup !== nothing && ispath(backup) && mv(backup, target)
-            rethrow()
+            staged_path = joinpath(entry_stage, _CACHE_DATA_NAME)
+            staged_meta = joinpath(entry_stage, _CACHE_META_NAME)
+            write(staged_path, data)
+            open(staged_meta, "w") do io
+                return TOML.print(io, meta; sorted=true)
+            end
+            _flush_file(staged_path)
+            _flush_file(staged_meta)
+            target = _cache_entry_dir(cache, key)
+            backup = nothing
+            if ispath(target)
+                backup = target * ".backup-" * string(rand(UInt))
+                mv(target, backup)
+            end
+            try
+                mv(entry_stage, target)
+                backup !== nothing && rm(backup; recursive=true, force=true)
+            catch
+                ispath(target) && rm(target; recursive=true, force=true)
+                backup !== nothing && ispath(backup) && mv(backup, target)
+                rethrow()
+            end
+            return path
+        finally
+            isdir(stage) && rm(stage; recursive=true, force=true)
         end
-        return path
-    finally
-        isdir(stage) && rm(stage; recursive=true, force=true)
     end
 end
 
@@ -430,27 +426,27 @@ Does not remove the directory itself.
 function clearcache(cache::Cache)
     !cache.enabled && return 0
     isdir(cache.directory) || return 0
-    count = 0
-    _cleanup_orphan_stages!(cache)
-    for key in readdir(cache.directory)
-        try
-            _validate_cache_key(key)
-            entry = _cache_entry_dir(cache, key)
-            isdir(entry) || continue
-            path = cache_path(cache, key)
-            meta_path = cache_meta_path(cache, key)
-            _validate_cache_entry(path, meta_path) || continue
-            rm(entry; recursive=true, force=true)
-            count += 1
-        catch error
-            error isa ArgumentError || rethrow()
+    return _with_cache_lock(cache) do
+        count = 0
+        _cleanup_orphan_stages!(cache)
+        for key in readdir(cache.directory)
+            try
+                entry = _cache_entry_dir(cache, key)
+                isdir(entry) || continue
+                path = cache_path(cache, key)
+                meta_path = cache_meta_path(cache, key)
+                (isfile(path) || isfile(meta_path)) || continue
+                rm(entry; recursive=true, force=true)
+                count += 1
+            catch error
+                error isa ArgumentError || rethrow()
+            end
         end
+        return count
     end
-    return count
 end
 
 function _cleanup_orphan_stages!(cache::Cache)
-    isdir(cache.directory) || return 0
     removed = 0
     for entry in readdir(cache.directory; join=true)
         name = basename(entry)
@@ -473,18 +469,28 @@ Remove a single cache entry and its metadata.
 function clearcache(cache::Cache, key::AbstractString)
     value = _validate_cache_key(key)
     !cache.enabled && return 0
-    removed = 0
-    entry = _cache_entry_dir(cache, value)
-    path = cache_path(cache, value)
-    meta_path = cache_meta_path(cache, value)
-    if isdir(entry) && _validate_cache_entry(path, meta_path)
+    isdir(cache.directory) || return 0
+    return _with_cache_lock(cache) do
+        entry = _cache_entry_dir(cache, value)
+        isdir(entry) || return 0
+        path = cache_path(cache, value)
+        meta_path = cache_meta_path(cache, value)
+        (isfile(path) || isfile(meta_path)) || return 0
         rm(entry; recursive=true, force=true)
-        removed = 1
+        return 1
     end
-    return removed
 end
 
 # ── Internal helpers ───────────────────────────────────────────────────────
+
+const _CACHE_LOCK_NAME = ".mimosa-cache.lock"
+
+function _with_cache_lock(f::F, cache::Cache) where {F}
+    root = abspath(cache.directory)
+    isdir(root) || mkpath(root)
+    # ponytail: one cache-wide lock; use per-key locks only if measured contention warrants it.
+    return Pidfile.mkpidlock(f, joinpath(root, _CACHE_LOCK_NAME); stale_age=300)
+end
 
 function _validate_cache_entry(path::AbstractString, meta_path::AbstractString)
     try

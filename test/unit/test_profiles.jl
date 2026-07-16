@@ -1,6 +1,10 @@
 using Test
 using Mimosa
 
+@testset "ScoreProfile validation" begin
+    @test_throws ModelFormatError ScoreProfile("bad", build_ragged([Float32[0.1, NaN32]]))
+end
+
 @testset "LogTailTable fit" begin
     # Empty input
     t = fit(EmpiricalLogTail(), Float32[])

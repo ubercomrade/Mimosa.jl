@@ -16,6 +16,8 @@ permissions:
 jobs:
   test:
     name: Test (${{ matrix.os }})
+    env:
+      JULIA_NUM_THREADS: '4'
     strategy:
       fail-fast: false
       matrix:
@@ -41,6 +43,8 @@ jobs:
   quality:
     name: Quality and downstream contract
     runs-on: ubuntu-22.04
+    env:
+      JULIA_NUM_THREADS: '4'
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
@@ -48,7 +52,7 @@ jobs:
           version: '1.12'
       - uses: julia-actions/cache@v2
       - name: Instantiate test environment
-        run: julia --project=test -e 'using Pkg; Pkg.instantiate()'
+        run: julia --project=test -e 'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate()'
       - name: Check formatting
         run: >-
           julia --project=test -e
@@ -59,4 +63,29 @@ jobs:
       - name: Test downstream API contract
         run: julia --project=test/downstream test/downstream/runtests.jl
       - name: Build documentation
-        run: julia --project=docs -e 'using Pkg; Pkg.instantiate(); include("docs/make.jl")'
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
+        run: >-
+          julia --project=docs -e
+          'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate();
+          include("docs/make.jl")'
+
+  docs:
+    name: Build and deploy documentation
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v2
+      - name: Build and deploy
+        env:
+          DOCUMENTER_DEPLOY: 'true'
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          julia --project=docs -e
+          'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate();
+          include("docs/make.jl")'

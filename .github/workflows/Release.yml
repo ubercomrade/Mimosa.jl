@@ -12,6 +12,8 @@ jobs:
   test:
     name: Release validation
     runs-on: ubuntu-22.04
+    env:
+      JULIA_NUM_THREADS: '4'
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
@@ -29,7 +31,7 @@ jobs:
       - name: Check formatting
         run: >-
           julia --project=test -e
-          'using Pkg; Pkg.instantiate();
+          'using Pkg; Pkg.develop(path=pwd()); Pkg.instantiate();
           using JuliaFormatter;
           @assert format("src"; overwrite=false);
           @assert format("test"; overwrite=false);

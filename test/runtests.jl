@@ -3,7 +3,7 @@ using Mimosa
 
 # Aqua quality checks — fail-closed (Aqua is a required test dependency).
 using Aqua
-Aqua.test_all(Mimosa; stale_deps=false, project_extras=false)
+Aqua.test_all(Mimosa; project_extras=false)
 
 function _test_context_model_contract(Model)
     model_name = string(nameof(Model))

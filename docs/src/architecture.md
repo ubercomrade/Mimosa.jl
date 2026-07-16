@@ -78,16 +78,16 @@ src/
     └── cache.jl
 ```
 
-## ADRs
+## Design contracts
 
-Architectural decisions are documented in the project's `docs/adr/` directory:
+Current design contracts are documented in these maintained pages:
 
-- ADR 0001: Model type hierarchy
-- ADR 0002: Sequence representation
-- ADR 0003: Storage format
-- ADR 0004: Parallelism and RNG
-- ADR 0005: GEV fitting
-- ADR 0006: Coordinate/offset/orientation conventions
+- [Extending Mimosa](extending.md): model type hierarchy and extension API
+- [Data Layout](data_layout.md): sequence and profile representation
+- [Storage Format](storage.md): portable bundle formats
+- [Reproducibility](reproducibility.md): parallelism and RNG
+- [Method](method.md): GEV fitting and statistical workflow
+- [Numerical Compatibility](numerical_compatibility.md): coordinates, offsets, and orientations
 
 ## Scanning contract
 

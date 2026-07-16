@@ -74,8 +74,8 @@ scan!(dest, model, sequence; strands=ForwardOnly())
 ```
 
 The scanning kernel is shared across model families and parameterized by
-the public geometry contract (ADR 0003):
-`motif_length`, `left_context`, and `right_context`. Mimosa.jl derives
+the [public geometry contract](extending.md): `motif_length`, `left_context`,
+and `right_context`. Mimosa.jl derives
 `window_size`, `npositions`, and `site_start_offset` from these.
 For BaMM, Dimont, and Slim, the window includes preceding context
 (`left_context = order/span`); for PWM and SiteGA it equals the motif

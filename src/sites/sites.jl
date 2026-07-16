@@ -676,7 +676,7 @@ function reconstruct_pfm(
 )
     selector = _resolve_selector(mode; score_threshold=score_threshold)
     if top_fraction !== nothing
-        selector = TopFractionHits(top_fraction)
+        selector = TopFractionHits(top_fraction, selector)
     end
 
     return reconstruct_pfm(

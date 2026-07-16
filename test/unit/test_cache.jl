@@ -16,7 +16,7 @@ using SHA
     @test disabled.enabled == false
 end
 
-@testset "Cache key contract and orphan cleanup" begin
+@testset "Cache key contract" begin
     dir = mktempdir()
     cache = Cache(dir)
     @test_throws ArgumentError cache_set(cache, "human key", UInt8[1])
@@ -118,10 +118,13 @@ end
     cache_set(cache, "keep", UInt8[1, 2])
     sentinel = joinpath(cache.directory, "sentinel.bin")
     write(sentinel, "keep")
-    mkpath(joinpath(cache.directory, "unrelated"))
+    unrelated = joinpath(cache.directory, "unrelated")
+    mkpath(unrelated)
+    @test clearcache(cache, "unrelated") == 0
+    @test isdir(unrelated)
     @test clearcache(cache) == 1
     @test isfile(sentinel)
-    @test isdir(joinpath(cache.directory, "unrelated"))
+    @test isdir(unrelated)
 
     if Sys.isunix()
         outside = tempname()
@@ -146,9 +149,32 @@ end
     data_path = joinpath(dir, key, "data.bin")
     write(data_path, UInt8[0, 0, 0, 0, 0])
 
-    # Should be detected as corrupted (checksum mismatch)
+    # Should be detected as corrupted (checksum mismatch), replaceable, and clearable.
     @test !cache_has(cache, key)
     @test cache_get(cache, key) === nothing
+    cache_set(cache, key, data)
+    @test cache_get(cache, key) == data
+
+    write(data_path, UInt8[0, 0, 0, 0, 0])
+    @test clearcache(cache, key) == 1
+    @test !ispath(joinpath(dir, key))
+
+    cache_set(cache, key, data)
+    rm(joinpath(dir, key, "meta.toml"))
+    @test clearcache(cache) == 1
+    @test !ispath(joinpath(dir, key))
+end
+
+@testset "Concurrent cache commits retain a complete entry" begin
+    dir = mktempdir()
+    cache = Cache(dir)
+    values = [fill(UInt8(i), 1024) for i in 1:16]
+    tasks = [Threads.@spawn cache_set(cache, "shared", value) for value in values]
+    fetch.(tasks)
+
+    stored = cache_get(cache, "shared")
+    @test stored in values
+    @test cache_has(cache, "shared")
 end
 
 @testset "Cache key determinism" begin

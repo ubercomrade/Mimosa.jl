@@ -65,9 +65,11 @@ function _validate_sitega(representation::AbstractMatrix, motif_length::Int)
             ),
         )
     end
-    if motif_length <= 0
+    if motif_length < 2
         throw(
-            ModelDimensionError("SiteGA motif_length must be positive, got $motif_length.")
+            ModelDimensionError(
+                "SiteGA motif_length must be at least 2, got $motif_length."
+            ),
         )
     end
     if !all(isfinite, representation)
