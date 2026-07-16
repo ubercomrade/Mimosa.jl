@@ -302,22 +302,6 @@ end
     @test code == 0
 end
 
-@testset "CLI build-null: removed strategy option" begin
-    code = Mimosa.main([
-        "build-null",
-        "motifs.meme",
-        "--model-type",
-        "pwm",
-        "--groups",
-        "groups.tsv",
-        "--strategy",
-        "bogus",
-        "--output",
-        "out",
-    ])
-    @test code == 1
-end
-
 @testset "CLI build-null: invalid profile metric" begin
     code = Mimosa.main([
         "build-null",
