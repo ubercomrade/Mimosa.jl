@@ -85,8 +85,9 @@ pfm = reconstruct_pfm(
 )
 ```
 
-Site ranges are one-based and inclusive in the Julia API. JSON serialization
-converts them to zero-based half-open coordinates.
+Site collections store one-based scan positions in `starts`. For models with
+context, the physical motif starts at `start + site_start_offset(model)`. JSON
+serialization is available for comparison results, not site collections.
 
 ## Null Distributions
 
@@ -94,7 +95,7 @@ converts them to zero-based half-open coordinates.
 models = [query, target, readmodel("examples/foxa2.meme")]
 relations = parse_group_relations(
     "groups.tsv";
-    known_names=Set(model.name for model in models),
+    known_names=Set(modelname(model) for model in models),
 )
 
 null_result = build_null(

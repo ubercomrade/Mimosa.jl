@@ -85,9 +85,8 @@ Current design contracts are documented in these maintained pages:
 - [Extending Mimosa](extending.md): model type hierarchy and extension API
 - [Data Layout](data_layout.md): sequence and profile representation
 - [Storage Format](storage.md): portable bundle formats
-- [Reproducibility](reproducibility.md): parallelism and RNG
 - [Method](method.md): GEV fitting and statistical workflow
-- [Numerical Compatibility](numerical_compatibility.md): coordinates, offsets, and orientations
+- [Data Layout](data_layout.md): coordinates, offsets, and orientations
 
 ## Scanning contract
 

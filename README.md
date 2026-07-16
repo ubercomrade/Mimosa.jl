@@ -88,8 +88,8 @@ println(to_json(result))
 
 See the [Quick Start](docs/src/quickstart.md) for scanning, prepared profiles,
 site extraction, PFM reconstruction, null distributions, and threading. The
-[API reference](docs/src/api.md) documents every public interface. Example
-models, sequences, profiles, and runnable scripts are in
+[Julia API Guide](docs/src/api.md) explains the main workflows and core public
+interfaces. Example models, sequences, profiles, and runnable scripts are in
 [`examples/`](examples/).
 
 ## Documentation
@@ -97,9 +97,8 @@ models, sequences, profiles, and runnable scripts are in
 - [Method and similarity metrics](docs/src/method.md)
 - [Quick Start](docs/src/quickstart.md)
 - [CLI guide](docs/src/cli.md)
-- [Julia API reference](docs/src/api.md)
+- [Julia API Guide](docs/src/api.md)
 - [Supported models and formats](docs/src/models.md)
-- [Extending Mimosa with custom models](docs/src/extending.md)
 
 ## License
 

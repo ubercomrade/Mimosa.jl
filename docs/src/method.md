@@ -49,8 +49,7 @@ Cosine(v_1,v_2) =
 ```
 
 All metrics are oriented so that a larger value means a stronger match. See
-[Numerical Compatibility](numerical_compatibility.md) for edge cases and
-tolerance contracts.
+[Data Layout](data_layout.md) for coordinate and orientation conventions.
 
 ## Statistical significance
 
@@ -63,7 +62,8 @@ Benjamini-Hochberg adjusted p-values and E-values.
 Null bundles are reusable only when their profile metric, comparison settings,
 sequence and background fingerprints, and format contract are compatible with
 the observed comparison. See [Storage Format](storage.md) for the null bundle
-contract and [Reproducibility](reproducibility.md) for determinism guarantees.
+contract. Serial and threaded execution preserve result order and exact
+comparison fields.
 
 ## References
 

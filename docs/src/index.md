@@ -33,19 +33,10 @@ Mimosa
 
 ## Navigation
 
-- [Method](method.md)
 - [Quick Start](quickstart.md)
-- [Julia API](api.md)
+- [Julia API Guide](api.md)
 - [CLI](cli.md)
 - [Supported Models](models.md)
-- [Feature Matrix](feature_matrix.md)
+- [Method](method.md)
 - [Data Layout](data_layout.md)
-- [Numerical Compatibility](numerical_compatibility.md)
-- [Reproducibility](reproducibility.md)
 - [Storage Format](storage.md)
-- [Security](security.md)
-- [Historical Python Migration](migration.md)
-- [Extending Mimosa](extending.md)
-- [MotifHORDE Contract](downstream_contract.md)
-- [Architecture](architecture.md)
-- [Release and Validation](release.md)

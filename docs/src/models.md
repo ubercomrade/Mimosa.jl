@@ -1,7 +1,7 @@
 # Supported Models
 
-Mimosa.jl supports six model families, each with a concrete immutable type
-and specific file format.
+Mimosa.jl supports five motif model families, each with a concrete immutable
+type and specific file format.
 
 ## Model types
 

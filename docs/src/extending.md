@@ -6,8 +6,8 @@ participate in `scan`, `prepare_profile`, `compare`, `selectsites`, and
 `reconstruct_pfm` by implementing only three methods. Models with
 context implement two additional geometry methods.
 
-This page is the current contract. Its implementation history is recorded in
-the Extensibility API Plan (`EXTENSIBILITY_API_PLAN.md`) at the repository root.
+This page is the current contract for advanced users who need to add a custom
+motif model.
 
 ## Minimal contract for comparison
 

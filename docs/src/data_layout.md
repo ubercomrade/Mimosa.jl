@@ -90,9 +90,9 @@ Built-in mapping:
 |-------|----------------|----------------|-----------------|
 | PWM    | `length(model)` | 0 | 0 |
 | SiteGA | `model.motif_length` | 0 | 0 |
-| BaMM   | `model.motif_length` | `model.order` | 0 |
-| Dimont | `model.motif_length` | `model.span` | 0 |
-| Slim   | `model.motif_length` | `model.span` | 0 |
+| BaMM   | `model.motif_length` | `model.order` | `model.order` |
+| Dimont | `model.motif_length` | `model.span` | `model.span` |
+| Slim   | `model.motif_length` | `model.span` | `model.span` |
 
 ### CLI JSON coordinates
 
