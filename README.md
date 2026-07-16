@@ -45,7 +45,9 @@ Pkg.add(url="https://github.com/ubercomrade/Mimosa.jl.git")
 
 ## CLI
 
-Install the Julia-backed executable with the experimental Pkg Apps interface:
+There are two ways to install and run the CLI.
+
+With the experimental Pkg Apps interface, install the Julia-backed executable:
 
 ```julia
 using Pkg
@@ -55,6 +57,20 @@ Pkg.Apps.add(url="https://github.com/ubercomrade/Mimosa.jl.git")
 Add `~/.julia/bin` to `PATH`, then run `mimosa profile ...`. Use `--` before
 application arguments when the first application argument starts with a dash,
 for example `mimosa -- --help`.
+
+If Mimosa is installed as a regular Julia package with `Pkg.add`, invoke its
+CLI module through Julia:
+
+```julia
+using Pkg
+Pkg.add(url="https://github.com/ubercomrade/Mimosa.jl.git")
+```
+
+```bash
+julia -m Mimosa.CLIApp profile examples/pif4.meme examples/gata2.meme \
+  --model1-type pwm --model2-type pwm \
+  --fasta examples/foreground.fa --metric co
+```
 
 The CLI can also be run directly from a repository checkout:
 

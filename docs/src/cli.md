@@ -18,6 +18,20 @@ that `~/.julia/bin` is on `PATH`. Examples include `mimosa -- --help` and
 `mimosa profile ...`; the separator is needed when the first application
 argument begins with `-`.
 
+If Mimosa is installed as a regular Julia package, use `Pkg.add` and invoke the
+CLI module through Julia:
+
+```julia
+using Pkg
+Pkg.add(url="https://github.com/ubercomrade/Mimosa.jl.git")
+```
+
+```bash
+julia -m Mimosa.CLIApp profile examples/pif4.meme examples/gata2.meme \
+  --model1-type pwm --model2-type pwm \
+  --fasta examples/foreground.fa --metric co
+```
+
 Standalone archives attached to GitHub Releases include Julia and do not
 require a Julia installation. Extract the entire archive and invoke
 `Mimosa/bin/mimosa` (`Mimosa/bin/mimosa.exe` on Windows).
