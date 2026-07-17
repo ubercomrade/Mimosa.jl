@@ -54,9 +54,8 @@ using Pkg
 Pkg.Apps.add(url="https://github.com/ubercomrade/Mimosa.jl.git")
 ```
 
-Add `~/.julia/bin` to `PATH`, then run `mimosa profile ...`. Use `--` before
-application arguments when the first application argument starts with a dash,
-for example `mimosa -- --help`.
+Add `~/.julia/bin` to `PATH`, then run `mimosa -- profile ...`. The `--`
+separates Pkg App arguments, for example `mimosa -- --help`.
 
 If Mimosa is installed as a regular Julia package with `Pkg.add`, invoke its
 CLI module through Julia:
@@ -67,16 +66,7 @@ Pkg.add(url="https://github.com/ubercomrade/Mimosa.jl.git")
 ```
 
 ```bash
-julia -m Mimosa.CLIApp profile examples/pif4.meme examples/gata2.meme \
-  --model1-type pwm --model2-type pwm \
-  --fasta examples/foreground.fa --metric co
-```
-
-The CLI can also be run directly from a repository checkout:
-
-```bash
-julia --project=. app/mimosa.jl \
-  profile examples/pif4.meme examples/gata2.meme \
+julia -m Mimosa profile examples/pif4.meme examples/gata2.meme \
   --model1-type pwm --model2-type pwm \
   --fasta examples/foreground.fa --metric co
 ```

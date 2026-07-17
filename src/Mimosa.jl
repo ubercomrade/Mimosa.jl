@@ -25,8 +25,12 @@ include("statistics/statistics.jl")
 include("cache/cache.jl")
 include("serialization.jl")
 include("cli.jl")
-include("cli_app.jl")
 include("precompile.jl")
+
+function (@main)(args::Vector{String})
+    PROGRAM_FILE == string(nameof(@__MODULE__)) || return 0
+    return cli_main(args)
+end
 
 export readmodel,
     read_scores,
@@ -165,10 +169,10 @@ export GEVFit,
     loadnull,
     NULL_FORMAT_VERSION
 
-# Parallelism exports (Stage 7)
+# Parallelism exports
 export ExecutionPolicy, SerialExecution, ThreadedExecution
 
-# Cache exports (Stage 7)
+# Cache exports
 export Cache,
     cache_key,
     prepared_profile_cache_key,

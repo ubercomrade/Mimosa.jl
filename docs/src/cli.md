@@ -15,8 +15,7 @@ Pkg.Apps.add(url="https://github.com/ubercomrade/Mimosa.jl.git")
 
 After registration in General, `Pkg.Apps.add("Mimosa")` is sufficient. Ensure
 that `~/.julia/bin` is on `PATH`. Examples include `mimosa -- --help` and
-`mimosa profile ...`; the separator is needed when the first application
-argument begins with `-`.
+`mimosa -- profile ...`; the separator separates Pkg App arguments.
 
 If Mimosa is installed as a regular Julia package, use `Pkg.add` and invoke the
 CLI module through Julia:
@@ -27,7 +26,7 @@ Pkg.add(url="https://github.com/ubercomrade/Mimosa.jl.git")
 ```
 
 ```bash
-julia -m Mimosa.CLIApp profile examples/pif4.meme examples/gata2.meme \
+julia -m Mimosa profile examples/pif4.meme examples/gata2.meme \
   --model1-type pwm --model2-type pwm \
   --fasta examples/foreground.fa --metric co
 ```
@@ -36,12 +35,6 @@ Standalone archives attached to GitHub Releases include Julia and do not
 require a Julia installation. Extract the entire archive and invoke
 `Mimosa/bin/mimosa` (`Mimosa/bin/mimosa.exe` on Windows).
 
-For development, run commands from the repository root:
-
-```bash
-julia --project=. app/mimosa.jl <command> [options]
-```
-
 ## Commands
 
 ### `profile`
@@ -49,7 +42,7 @@ julia --project=. app/mimosa.jl <command> [options]
 Compare model-derived or precomputed score profiles:
 
 ```bash
-JULIA_NUM_THREADS=4 julia --project=. app/mimosa.jl \
+JULIA_NUM_THREADS=4 julia -m Mimosa \
   profile examples/pif4.meme examples/gata2.meme \
   --model1-type pwm --model2-type pwm \
   --fasta examples/foreground.fa --metric co --threads 4
@@ -75,7 +68,7 @@ the model, sequences, background, and threshold are unchanged.
 ### `build-null`
 
 ```bash
-julia --project=. app/mimosa.jl build-null motifs/ \
+julia -m Mimosa build-null motifs/ \
   --model-type pwm --groups groups.tsv --output output/null_bundle \
   --fasta examples/foreground.fa --metric co
 ```
@@ -88,7 +81,7 @@ a version-4 profile null bundle. `--jobs` is a deprecated alias for `--threads`.
 ### `cache clear`
 
 ```bash
-julia --project=. app/mimosa.jl \
+julia -m Mimosa \
   cache clear --cache-dir .mimosa-cache
 ```
 

@@ -1,7 +1,7 @@
-# Stage 8 CLI: thin adapter from command-line arguments to the public Mimosa API.
+# CLI: thin adapter from command-line arguments to the public Mimosa API.
 #
-# Design: a small self-contained subcommand parser (no external dependency).
-# Each subcommand maps to a typed configuration, calls the public API, and
+# ArgParse owns command-line syntax and help generation. Each subcommand maps
+# to a typed configuration, calls the public API, and
 # serializes results as JSON to stdout. Diagnostics and progress go to stderr.
 #
 # Exit codes:
@@ -11,78 +11,13 @@
 #
 # JSON output goes to stdout only. Logs and errors go to stderr only.
 
+using ArgParse
+
 const CLI_VERSION = string(Base.pkgversion(@__MODULE__))
 
 const MODEL_TYPES = ["pwm", "bamm", "sitega", "dimont", "slim"]
 const PROFILE_MODEL_TYPES = ["scores", MODEL_TYPES...]
 const PROFILE_METRICS = ["co", "co_rowwise", "dice", "dice_rowwise", "cosine"]
-
-# ── Typed command option specifications ─────────────────────────────────────
-#
-# Each command has a static option spec (which --options take values) and a
-# set of flag names (boolean --flags). These are defined as constants here,
-# separate from both the parser and the runners, so that adding a new option
-# requires only updating the spec, not the main() dispatch.
-
-const PROFILE_OPTIONS = Dict{String,Bool}(
-    "model1-type" => true,
-    "model2-type" => true,
-    "metric" => true,
-    "search-range" => true,
-    "window-radius" => true,
-    "realign-window" => true,
-    "min-logfpr" => true,
-    "fasta" => true,
-    "background" => true,
-    "num-sequences" => true,
-    "seq-length" => true,
-    "seed" => true,
-    "background-freq" => true,
-    "threads" => true,
-    "cache-dir" => true,
-    "null-distribution" => true,
-    "effective-number-of-targets" => true,
-)
-const PROFILE_FLAGS = Set(["pvalue", "quiet", "verbose"])
-
-const BUILD_NULL_OPTIONS = Dict{String,Bool}(
-    "model-type" => true,
-    "groups" => true,
-    "output" => true,
-    "name-column" => true,
-    "group-column" => true,
-    "metric" => true,
-    "fasta" => true,
-    "num-sequences" => true,
-    "seq-length" => true,
-    "seed" => true,
-    "search-range" => true,
-    "window-radius" => true,
-    "realign-window" => true,
-    "min-logfpr" => true,
-    "min-null-targets" => true,
-    "threads" => true,
-    "jobs" => true,
-)
-const BUILD_NULL_FLAGS = Set(["ignore-missing", "strict", "quiet", "verbose"])
-
-const CACHE_OPTIONS = Dict{String,Bool}("cache-dir" => true, "threads" => true)
-const CACHE_FLAGS = Set(["quiet", "verbose"])
-
-# Map command name to (option_spec, flag_spec) for dispatch.
-const COMMAND_SPECS = Dict{
-    String,NamedTuple{(:options, :flags),Tuple{Dict{String,Bool},Set{String}}}
-}(
-    "profile" => (options=PROFILE_OPTIONS, flags=PROFILE_FLAGS),
-    "build-null" => (options=BUILD_NULL_OPTIONS, flags=BUILD_NULL_FLAGS),
-    "cache" => (options=CACHE_OPTIONS, flags=CACHE_FLAGS),
-)
-
-# ── CLI argument parsing ────────────────────────────────────────────────────
-#
-# Layer 1: Parser. Parses raw command-line arguments into a CLIParsed struct
-# (command name, positional args, option dict, flag set). Does NOT perform
-# scientific validation or call the Mimosa API. Validation is done by runners.
 
 struct CLIError <: Exception
     message::String
@@ -115,111 +50,6 @@ function CLIParsed(command::String)
     return CLIParsed(command, String[], Dict{String,String}(), Set{String}())
 end
 
-function _print_global_help(io::IO)
-    println(io, "mimosa $(CLI_VERSION) — motif comparison and statistical evaluation")
-    println(io, "")
-    println(io, "Usage: mimosa <command> [options]")
-    println(io, "")
-    println(io, "Commands:")
-    println(io, "  profile       Profile-based comparison (scan → normalize → compare)")
-    println(
-        io, "  build-null    Build a null distribution from unrelated motif comparisons"
-    )
-    println(io, "  cache         Manage disk cache (clear)")
-    println(io, "")
-    println(io, "Global options:")
-    println(io, "  --help, -h    Show this help message")
-    println(io, "  --version, -V Show version")
-    println(io, "  --quiet       Suppress informational stderr output")
-    println(io, "  --verbose     Enable verbose stderr diagnostics")
-    return nothing
-end
-
-"""
-    _parse_cli(args::Vector{String})
-
-Parse command-line arguments into a command name and parsed options.
-Returns `(command, positional, options, flags)` or throws `CLIError`.
-"""
-function _parse_cli(args::Vector{String})
-    if isempty(args)
-        _print_global_help(stderr)
-        throw(CLIError("no command specified."))
-    end
-
-    idx = 1
-    global_flags = String[]
-    # Check for global flags before command
-    while idx <= length(args) && startswith(args[idx], "-")
-        if args[idx] in ("--help", "-h")
-            _print_global_help(stdout)
-            return nothing
-        elseif args[idx] in ("--version", "-V")
-            println(stdout, "mimosa $(CLI_VERSION)")
-            return nothing
-        elseif args[idx] == "--quiet"
-            push!(global_flags, "--quiet")
-        elseif args[idx] == "--verbose"
-            push!(global_flags, "--verbose")
-        else
-            throw(CLIError("unknown global option: $(args[idx])"))
-        end
-        idx += 1
-    end
-
-    idx > length(args) && throw(CLIError("no command specified."))
-    command = args[idx]
-    idx += 1
-
-    return (command, vcat(global_flags, args[idx:end]))
-end
-
-"""
-    _parse_command_args(args, spec)
-
-Parse command arguments according to a simple spec.
-`spec` is a named tuple with:
-- `positional`: vector of (name, required, help)
-- `options`: vector of (name, takes_value, default, help)
-- `flags`: vector of (name, help)
-
-Returns `CLIParsed` or throws `CLIError`.
-"""
-function _parse_command_args(
-    command::String, args::Vector{String}, positional_names, option_specs, flag_names
-)
-    parsed = CLIParsed(command)
-    i = 1
-    while i <= length(args)
-        arg = args[i]
-        if arg in ("--help", "-h")
-            return :help
-        elseif startswith(arg, "--")
-            key = arg[3:end]
-            if key in flag_names
-                push!(parsed.flags, key)
-            elseif haskey(option_specs, key)
-                i += 1
-                i > length(args) && throw(CLIError("--$(key) requires a value."))
-                parsed.options[key] = args[i]
-            else
-                throw(CLIError("unknown option: --$(key)"))
-            end
-        elseif startswith(arg, "-") && length(arg) > 1
-            # Single-dash flag aliases
-            key = arg[2:end]
-            if key in flag_names
-                push!(parsed.flags, key)
-            else
-                throw(CLIError("unknown flag: -$(key)"))
-            end
-        else
-            push!(parsed.positional, arg)
-        end
-        i += 1
-    end
-    return parsed
-end
 
 # ── Type and model resolution ────────────────────────────────────────────────
 #
@@ -788,41 +618,151 @@ end
 
 # ── Main entry point ─────────────────────────────────────────────────────────
 #
-# The main() function is the orchestration layer: it dispatches to the
-# appropriate command runner based on the command name. Option specs are
-# looked up from COMMAND_SPECS (defined above). The parser (_parse_command_args)
-# does not perform scientific validation; the runner (_run_*) validates and
-# calls the public API.
+# ArgParse owns CLI syntax, including subcommands, option validation, and help
+# output. Runners receive the small adapter struct used by the existing API
+# bridge, so scientific validation remains separate from argument parsing.
+
+function _add_common_flags!(settings)
+    @add_arg_table! settings begin
+        "--quiet"
+            action = :store_true
+            help = "suppress informational output"
+        "--verbose"
+            action = :store_true
+            help = "enable verbose diagnostics"
+    end
+end
+
+function _cli_settings()
+    settings = ArgParseSettings(
+        prog="mimosa",
+        description="Motif comparison and statistical evaluation.",
+        version="mimosa $(CLI_VERSION)",
+    )
+    settings.exit_after_help = false
+    settings.exc_handler = (_, err) -> throw(CLIError(err.text))
+    @add_arg_table! settings begin
+        "--version", "-V"
+            action = :show_version
+        "profile"
+            action = :command
+            help = "compare two motif score profiles"
+        "build-null"
+            action = :command
+            help = "build a null distribution from motif comparisons"
+        "cache"
+            action = :command
+            help = "manage the disk cache"
+    end
+
+    profile = settings["profile"]
+    @add_arg_table! profile begin
+        "model1"
+            help = "first model or score-profile file"
+            required = true
+        "model2"
+            help = "second model or score-profile file"
+            required = true
+        "--model1-type"
+            required = true
+        "--model2-type"
+            required = true
+        "--metric"
+        "--search-range"
+        "--window-radius"
+        "--realign-window"
+        "--min-logfpr"
+        "--fasta"
+        "--background"
+        "--num-sequences"
+        "--seq-length"
+        "--seed"
+        "--background-freq"
+        "--threads"
+        "--cache-dir"
+        "--null-distribution"
+        "--effective-number-of-targets"
+        "--pvalue"
+            action = :store_true
+    end
+    _add_common_flags!(profile)
+
+    build_null = settings["build-null"]
+    @add_arg_table! build_null begin
+        "motifs"
+            help = "motif collection path"
+            required = true
+        "--model-type"
+            required = true
+        "--groups"
+            required = true
+        "--output"
+            required = true
+        "--name-column"
+        "--group-column"
+        "--metric"
+        "--fasta"
+        "--num-sequences"
+        "--seq-length"
+        "--seed"
+        "--search-range"
+        "--window-radius"
+        "--realign-window"
+        "--min-logfpr"
+        "--min-null-targets"
+        "--threads"
+        "--jobs"
+        "--ignore-missing"
+            action = :store_true
+        "--strict"
+            action = :store_true
+    end
+    _add_common_flags!(build_null)
+
+    cache = settings["cache"]
+    @add_arg_table! cache begin
+        "operation"
+            help = "cache operation (clear)"
+            required = true
+        "--cache-dir"
+        "--threads"
+    end
+    _add_common_flags!(cache)
+    return settings
+end
+
+function _parsed_cli(args::Vector{String})
+    parsed_args = ArgParse.parse_args(args, _cli_settings())
+    parsed_args === nothing && return nothing
+    command = parsed_args["%COMMAND%"]
+    command === nothing && throw(CLIError("no command specified."))
+    values = parsed_args[command]
+    parsed = CLIParsed(command)
+    for name in ("model1", "model2", "motifs", "operation")
+        haskey(values, name) && push!(parsed.positional, values[name])
+    end
+    for (name, value) in values
+        name in ("model1", "model2", "motifs", "operation") && continue
+        if value isa Bool
+            value && push!(parsed.flags, name)
+        elseif !isnothing(value)
+            parsed.options[name] = value
+        end
+    end
+    return parsed
+end
 
 """
-    main(args=ARGS)
+    cli_main(args=ARGS)
 
 CLI entry point. Returns an integer exit code (0 on success, 1 on usage error,
 2 on runtime error). Prints JSON to stdout on success, diagnostics to stderr.
 """
-function main(args::Vector{String}=ARGS)::Int
+function cli_main(args::Vector{String}=ARGS)::Int
     try
-        parsed = _parse_cli(args)
-        parsed === nothing && return 0  # --help or --version
-        command, cmd_args = parsed
-
-        spec = get(COMMAND_SPECS, command, nothing)
-        if spec === nothing
-            if command in ("--help", "-h")
-                _print_global_help(stdout)
-                return 0
-            elseif command in ("--version", "-V")
-                println(stdout, "mimosa $(CLI_VERSION)")
-                return 0
-            else
-                _print_global_help(stderr)
-                throw(CLIError("unknown command: $(command)"))
-            end
-        end
-
-        cp = _parse_command_args(command, cmd_args, nothing, spec.options, spec.flags)
-        cp === :help && return _dispatch_help(command)
-        return _dispatch_runner(command, cp)
+        parsed = _parsed_cli(args)
+        parsed === nothing && return 0
+        return _dispatch_runner(parsed.command, parsed)
     catch e
         if e isa CLIError
             println(stderr, "error: $(e.message)")
@@ -832,17 +772,6 @@ function main(args::Vector{String}=ARGS)::Int
             return 2
         end
     end
-end
-
-function _dispatch_help(command::AbstractString)
-    if command == "profile"
-        _print_profile_help(stdout)
-    elseif command == "build-null"
-        _print_build_null_help(stdout)
-    elseif command == "cache"
-        _print_cache_help(stdout)
-    end
-    return 0
 end
 
 function _dispatch_runner(command::AbstractString, parsed::CLIParsed)
