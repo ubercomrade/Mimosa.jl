@@ -35,8 +35,17 @@ const ALGORITHM_VERSIONS = Dict{String,String}(
     "slim_scan" => "1",
     "motif_compare" => "1",
     "profile_compare" => "1",
+    "prepared_profile" => "1",
     "null_build" => "1",
 )
+
+# This format is intentionally independent of Julia's Serialization stdlib. Cache
+# entries can therefore be validated structurally and remain usable across Julia
+# sessions that use the same Mimosa cache format.
+const PREPARED_PROFILE_CACHE_FORMAT_VERSION = 1
+const _PREPARED_PROFILE_CACHE_MAGIC = UInt8[
+    0x4d, 0x49, 0x4d, 0x4f, 0x53, 0x41, 0x2d, 0x50, 0x52, 0x45, 0x50, 0x2d, 0x31,
+]
 
 # ── Cache type ──────────────────────────────────────────────────────────────
 
@@ -268,6 +277,194 @@ function cache_key(cache::Cache, algorithm::AbstractString, parts::AbstractStrin
     end
     full_hash = bytes2hex(SHA.sha256(take!(io)))
     return full_hash[1:16]
+end
+
+# ── Prepared profile cache ──────────────────────────────────────────────────
+
+"""
+    prepared_profile_cache_key(cache, source, sequences=nothing;
+                               background=nothing, min_logfpr=0.0f0)
+
+Return the content-addressed key for a normalized, anchor-indexed profile.
+The key includes the source, comparison sequences, optional calibration
+background, and anchor threshold. `sequences` must be supplied for motif
+models; score profiles do not consume sequence batches.
+"""
+function prepared_profile_cache_key(
+    cache::Cache,
+    source::AbstractProfileSource,
+    sequences::Union{Nothing,EncodedSequenceBatch}=nothing;
+    background::Union{Nothing,EncodedSequenceBatch}=nothing,
+    min_logfpr::Real=0.0f0,
+)
+    is_motif = source isa AbstractMotifModel
+    is_motif && sequences === nothing && throw(
+        ArgumentError("motif prepared-profile cache keys require comparison sequences.")
+    )
+    is_motif && validate_model(source; capability=:cache)
+    source_fingerprint = model_fingerprint(source)
+    sequence_part = sequences === nothing ? "sequences=none" : "sequences=$(sequence_fingerprint(sequences))"
+    effective_background = is_motif && background === nothing ? sequences : background
+    background_part =
+        effective_background === nothing ?
+        "background=none" : "background=$(sequence_fingerprint(effective_background))"
+    threshold = Float32(min_logfpr)
+    isfinite(threshold) || throw(ArgumentError("min_logfpr must be finite."))
+    return cache_key(
+        cache,
+        "prepared_profile",
+        "source=$source_fingerprint",
+        sequence_part,
+        background_part,
+        "min_logfpr=$(bitstring(threshold))",
+    )
+end
+
+function _cached_prepared_profile(
+    cache::Union{Nothing,Cache},
+    source::AbstractProfileSource,
+    sequences::Union{Nothing,EncodedSequenceBatch},
+    background::Union{Nothing,EncodedSequenceBatch},
+    threshold::Float32,
+)
+    (cache === nothing || !cache.enabled) && return (nothing, nothing)
+    key = prepared_profile_cache_key(
+        cache, source, sequences; background=background, min_logfpr=threshold
+    )
+    data = cache_get(cache, key)
+    data === nothing && return (key, nothing)
+    return (key, _decode_prepared_profile(data))
+end
+
+function _store_prepared_profile!(
+    cache::Union{Nothing,Cache}, key::Union{Nothing,String}, profile::PreparedProfile
+)
+    (cache === nothing || !cache.enabled || key === nothing) && return profile
+    cache_set(
+        cache,
+        key,
+        _encode_prepared_profile(profile);
+        metadata=Dict(
+            "algorithm" => "prepared_profile",
+            "prepared_profile_format_version" => PREPARED_PROFILE_CACHE_FORMAT_VERSION,
+        ),
+    )
+    return profile
+end
+
+function _encode_prepared_profile(profile::PreparedProfile)
+    io = IOBuffer()
+    write(io, _PREPARED_PROFILE_CACHE_MAGIC)
+    _write_cache_u64!(io, PREPARED_PROFILE_CACHE_FORMAT_VERSION)
+    _write_cache_string!(io, profile.name)
+    _write_cache_f32!(io, profile.min_logfpr)
+    _write_cache_ragged!(io, profile.bundle.forward)
+    _write_cache_ragged!(io, profile.bundle.reverse)
+    _write_cache_anchor_csr!(io, profile.anchors[1])
+    _write_cache_anchor_csr!(io, profile.anchors[2])
+    return take!(io)
+end
+
+function _decode_prepared_profile(data::AbstractVector{UInt8})
+    try
+        io = IOBuffer(data)
+        read(io, UInt8, length(_PREPARED_PROFILE_CACHE_MAGIC)) == _PREPARED_PROFILE_CACHE_MAGIC ||
+            return nothing
+        _read_cache_u64(io) == PREPARED_PROFILE_CACHE_FORMAT_VERSION || return nothing
+        name = _read_cache_string(io)
+        threshold = _read_cache_f32(io)
+        isfinite(threshold) || return nothing
+        forward = _read_cache_ragged(io)
+        reverse = _read_cache_ragged(io)
+        anchors = (_read_cache_anchor_csr(io), _read_cache_anchor_csr(io))
+        eof(io) || return nothing
+        return PreparedProfile(name, StrandPair(forward, reverse), anchors, threshold)
+    catch
+        # A checksum-valid entry can still be from an unknown or malformed
+        # prepared-profile format. Treat it as a normal cache miss.
+        return nothing
+    end
+end
+
+function _write_cache_u64!(io::IO, value::Integer)
+    value >= 0 || throw(ArgumentError("cache vector length must be non-negative."))
+    return write(io, htol(UInt64(value)))
+end
+
+function _read_cache_u64(io::IO)
+    value = ltoh(read(io, UInt64))
+    value <= UInt64(typemax(Int)) || throw(ArgumentError("cached vector is too large."))
+    return Int(value)
+end
+
+function _write_cache_string!(io::IO, value::String)
+    bytes = Vector{UInt8}(codeunits(value))
+    _write_cache_u64!(io, length(bytes))
+    return write(io, bytes)
+end
+
+function _read_cache_string(io::IO)
+    count = _read_cache_u64(io)
+    count <= bytesavailable(io) || throw(ArgumentError("truncated cached string."))
+    return String(read(io, UInt8, count))
+end
+
+function _write_cache_f32!(io::IO, value::Float32)
+    return write(io, htol(reinterpret(UInt32, value)))
+end
+
+function _read_cache_f32(io::IO)
+    return reinterpret(Float32, ltoh(read(io, UInt32)))
+end
+
+function _write_cache_int_vector!(io::IO, values::AbstractVector{Int})
+    _write_cache_u64!(io, length(values))
+    for value in values
+        write(io, htol(reinterpret(UInt64, Int64(value))))
+    end
+    return nothing
+end
+
+function _read_cache_int_vector(io::IO)
+    count = _read_cache_u64(io)
+    count <= bytesavailable(io) ÷ sizeof(UInt64) || throw(ArgumentError("truncated cached integer vector."))
+    values = Vector{Int}(undef, count)
+    for index in eachindex(values)
+        value = reinterpret(Int64, ltoh(read(io, UInt64)))
+        typemin(Int) <= value <= typemax(Int) || throw(ArgumentError("cached integer is out of range."))
+        values[index] = Int(value)
+    end
+    return values
+end
+
+function _write_cache_ragged!(io::IO, ragged::RaggedArray{Float32})
+    _write_cache_u64!(io, length(ragged.data))
+    for value in ragged.data
+        _write_cache_f32!(io, value)
+    end
+    _write_cache_int_vector!(io, ragged.offsets)
+    return nothing
+end
+
+function _read_cache_ragged(io::IO)
+    count = _read_cache_u64(io)
+    count <= bytesavailable(io) ÷ sizeof(UInt32) || throw(ArgumentError("truncated cached score vector."))
+    data = Vector{Float32}(undef, count)
+    for index in eachindex(data)
+        data[index] = _read_cache_f32(io)
+        isfinite(data[index]) || throw(ArgumentError("cached scores must be finite."))
+    end
+    return RaggedArray(data, _read_cache_int_vector(io))
+end
+
+function _write_cache_anchor_csr!(io::IO, csr::AnchorCSR)
+    _write_cache_int_vector!(io, csr.positions)
+    _write_cache_int_vector!(io, csr.offsets)
+    return nothing
+end
+
+function _read_cache_anchor_csr(io::IO)
+    return AnchorCSR(_read_cache_int_vector(io), _read_cache_int_vector(io))
 end
 
 # ── Cache file paths ────────────────────────────────────────────────────────

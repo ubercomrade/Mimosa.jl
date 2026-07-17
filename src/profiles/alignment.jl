@@ -853,13 +853,20 @@ Keyword arguments:
 - `min_logfpr::Float32=0.0`: minimum log FPR for threshold anchors (0 = best anchors).
 """
 function prepare_profile(
-    model::ScoreProfile; min_logfpr::Real=0.0, execution::ExecutionPolicy=SerialExecution()
+    model::ScoreProfile;
+    min_logfpr::Real=0.0,
+    execution::ExecutionPolicy=SerialExecution(),
+    cache=nothing,
 )
     threshold = Float32(min_logfpr)
+    isfinite(threshold) || throw(ArgumentError("min_logfpr must be finite."))
+    key, cached = _cached_prepared_profile(cache, model, nothing, nothing, threshold)
+    cached !== nothing && return cached
     _, normalized = _fit_transform_empirical(model.scores)
     norm_bundle = StrandPair(normalized, normalized)
     anchors = _collect_both_anchors(norm_bundle, threshold)
-    return PreparedProfile(String(modelname(model)), norm_bundle, anchors, threshold)
+    prepared = PreparedProfile(String(modelname(model)), norm_bundle, anchors, threshold)
+    return _store_prepared_profile!(cache, key, prepared)
 end
 
 """
@@ -878,9 +885,13 @@ function prepare_profile(
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     min_logfpr::Real=0.0,
     execution::ExecutionPolicy=SerialExecution(),
+    cache=nothing,
 )
     threshold = Float32(min_logfpr)
+    isfinite(threshold) || throw(ArgumentError("min_logfpr must be finite."))
     validate_model(model; capability=:compare)
+    key, cached = _cached_prepared_profile(cache, model, sequences, background, threshold)
+    cached !== nothing && return cached
     raw = _scan_model_batch(model, sequences; strands=BothStrands(), execution=execution)
     bg = background === nothing ? sequences : background
     if bg === sequences
@@ -891,7 +902,8 @@ function prepare_profile(
         norm_bundle = normalize_bundle(table, raw)
     end
     anchors = _collect_both_anchors(norm_bundle, threshold)
-    return PreparedProfile(String(modelname(model)), norm_bundle, anchors, threshold)
+    prepared = PreparedProfile(String(modelname(model)), norm_bundle, anchors, threshold)
+    return _store_prepared_profile!(cache, key, prepared)
 end
 
 # ── PreparedProfile compare methods ────────────────────────────────────────────
@@ -917,14 +929,13 @@ function compare(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
+    cache=nothing,
 )
     m = _resolve_profile_metric(metric)
     threshold = min_logfpr === nothing ? query.min_logfpr : Float32(min_logfpr)
     threshold == query.min_logfpr ||
         throw(ArgumentError("min_logfpr differs from the prepared query threshold."))
-    _, target_scores = _fit_transform_empirical(target.scores)
-    target_norm = StrandPair(target_scores, target_scores)
-    target_anchors = _collect_both_anchors(target_norm, threshold)
+    prepared_target = prepare_profile(target; min_logfpr=threshold, cache=cache)
     config = ProfileConfig(;
         metric=m,
         search_range=search_range,
@@ -933,7 +944,7 @@ function compare(
         min_logfpr=threshold,
     )
     score, shift, orientation, n_sites, metric_str = profile_compare(
-        query.bundle, query.anchors, target_norm, target_anchors, config
+        query.bundle, query.anchors, prepared_target.bundle, prepared_target.anchors, config
     )
     return ComparisonResult(
         modelname(query), modelname(target), score, shift, orientation, metric_str, n_sites
@@ -983,6 +994,7 @@ function compare(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
+    cache=nothing,
 )
     threshold = min_logfpr === nothing ? query.min_logfpr : Float32(min_logfpr)
     threshold == query.min_logfpr ||
@@ -995,11 +1007,9 @@ function compare(
     isempty(targets) && return results
     _parallel_for(execution, length(targets)) do i
         target = targets[i]
-        _, target_scores = _fit_transform_empirical(target.scores)
-        target_bundle = StrandPair(target_scores, target_scores)
-        target_anchors = _collect_both_anchors(target_bundle, threshold)
+        prepared_target = prepare_profile(target; min_logfpr=threshold, cache=cache)
         score, shift, orientation, n_sites, metric_str = profile_compare(
-            query.bundle, query.anchors, target_bundle, target_anchors, config
+            query.bundle, query.anchors, prepared_target.bundle, prepared_target.anchors, config
         )
         return results[i] = ComparisonResult(
             modelname(query),
@@ -1072,15 +1082,19 @@ function compare(
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     execution::ExecutionPolicy=SerialExecution(),
+    cache=nothing,
 )
     m = _resolve_profile_metric(metric)
     threshold = min_logfpr === nothing ? query.min_logfpr : Float32(min_logfpr)
     threshold == query.min_logfpr ||
         throw(ArgumentError("min_logfpr differs from the prepared query threshold."))
-    target_norm = _resolve_profile_bundle(
-        target, sequences, background; execution=execution
+    prepared_target = prepare_profile(
+        target, sequences;
+        background=background,
+        min_logfpr=threshold,
+        execution=execution,
+        cache=cache,
     )
-    target_anchors = _collect_both_anchors(target_norm, threshold)
     config = ProfileConfig(;
         metric=m,
         search_range=search_range,
@@ -1089,7 +1103,7 @@ function compare(
         min_logfpr=threshold,
     )
     score, shift, orientation, n_sites, metric_str = profile_compare(
-        query.bundle, query.anchors, target_norm, target_anchors, config
+        query.bundle, query.anchors, prepared_target.bundle, prepared_target.anchors, config
     )
     return ComparisonResult(
         modelname(query), modelname(target), score, shift, orientation, metric_str, n_sites
@@ -1116,13 +1130,19 @@ function compare(
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     execution::ExecutionPolicy=SerialExecution(),
+    cache=nothing,
 )
     m = _resolve_profile_metric(metric)
     threshold = min_logfpr === nothing ? target.min_logfpr : Float32(min_logfpr)
     threshold == target.min_logfpr ||
         throw(ArgumentError("min_logfpr differs from the prepared target threshold."))
-    query_norm = _resolve_profile_bundle(query, sequences, background; execution=execution)
-    query_anchors = _collect_both_anchors(query_norm, threshold)
+    prepared_query = prepare_profile(
+        query, sequences;
+        background=background,
+        min_logfpr=threshold,
+        execution=execution,
+        cache=cache,
+    )
     config = ProfileConfig(;
         metric=m,
         search_range=search_range,
@@ -1131,7 +1151,7 @@ function compare(
         min_logfpr=threshold,
     )
     score, shift, orientation, n_sites, metric_str = profile_compare(
-        query_norm, query_anchors, target.bundle, target.anchors, config
+        prepared_query.bundle, prepared_query.anchors, target.bundle, target.anchors, config
     )
     return ComparisonResult(
         modelname(query), modelname(target), score, shift, orientation, metric_str, n_sites
@@ -1155,6 +1175,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
+    cache=nothing,
 )
     threshold = min_logfpr === nothing ? query.min_logfpr : Float32(min_logfpr)
     threshold == query.min_logfpr ||
@@ -1170,12 +1191,15 @@ function compare(
     isempty(targets) && return results
     _parallel_for(execution, length(targets)) do i
         target = targets[i]
-        target_bundle = _resolve_profile_bundle(
-            target, sequences, background; execution=SerialExecution()
+        prepared_target = prepare_profile(
+            target, sequences;
+            background=background,
+            min_logfpr=threshold,
+            execution=SerialExecution(),
+            cache=cache,
         )
-        target_anchors = _collect_both_anchors(target_bundle, threshold)
         score, shift, orientation, n_sites, metric_str = profile_compare(
-            query.bundle, query.anchors, target_bundle, target_anchors, config
+            query.bundle, query.anchors, prepared_target.bundle, prepared_target.anchors, config
         )
         return results[i] = ComparisonResult(
             modelname(query),
@@ -1207,8 +1231,9 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Real=0.0,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
+    cache=nothing,
 )
-    prepared_query = prepare_profile(query, sequences; background, min_logfpr, execution)
+    prepared_query = prepare_profile(query, sequences; background, min_logfpr, execution, cache)
     return compare(
         prepared_query,
         targets,
@@ -1219,5 +1244,6 @@ function compare(
         window_radius,
         realign_window,
         background,
+        cache,
     )
 end

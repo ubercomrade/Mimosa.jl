@@ -157,15 +157,22 @@ When one query is compared with many targets, prepare it once. Preparation
 performs scanning, normalization, and anchor collection:
 
 ```julia
-prepared_query = prepare_profile(query, sequences; min_logfpr=0.0)
+cache = Cache(".mimosa-cache")
+prepared_query = prepare_profile(query, sequences; min_logfpr=0.0, cache=cache)
 results = compare(
     prepared_query,
     [target, readmodel("examples/foxa2.meme")],
     sequences;
     metric=:cosine,
     execution=ThreadedExecution(4),
+    cache=cache,
 )
 ```
+
+`cache` is opt-in and stores normalized profiles plus anchors. Cache keys include
+the model content, comparison sequences, optional normalization background, and
+`min_logfpr`; changing any of these inputs produces a cache miss. Use
+`mimosa cache clear --cache-dir .mimosa-cache` to remove entries.
 
 For already computed score rows, use `ScoreProfile` and `read_scores`:
 

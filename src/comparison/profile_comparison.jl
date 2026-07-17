@@ -31,12 +31,13 @@ function compare(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Real=0.0,
+    cache=nothing,
 )
     m = _resolve_profile_metric(metric)
 
     return compare(
-        prepare_profile(query; min_logfpr=Float32(min_logfpr)),
-        prepare_profile(target; min_logfpr=Float32(min_logfpr));
+        prepare_profile(query; min_logfpr=Float32(min_logfpr), cache=cache),
+        prepare_profile(target; min_logfpr=Float32(min_logfpr), cache=cache);
         metric=m,
         search_range=search_range,
         window_radius=window_radius,
@@ -135,12 +136,23 @@ function compare(
     min_logfpr::Real=0.0,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     execution::ExecutionPolicy=SerialExecution(),
+    cache=nothing,
 )
     m = _resolve_profile_metric(metric)
     threshold = Float32(min_logfpr)
-    query_norm = _resolve_profile_bundle(query, sequences, background; execution=execution)
-    target_norm = _resolve_profile_bundle(
-        target, sequences, background; execution=execution
+    prepared_query = prepare_profile(
+        query, sequences;
+        background=background,
+        min_logfpr=threshold,
+        execution=execution,
+        cache=cache,
+    )
+    prepared_target = prepare_profile(
+        target, sequences;
+        background=background,
+        min_logfpr=threshold,
+        execution=execution,
+        cache=cache,
     )
     config = ProfileConfig(;
         metric=m,
@@ -149,10 +161,12 @@ function compare(
         realign_window=realign_window,
         min_logfpr=threshold,
     )
-    query_anchors = _collect_both_anchors(query_norm, threshold)
-    target_anchors = _collect_both_anchors(target_norm, threshold)
     score, shift, orientation, n_sites, metric_str = profile_compare(
-        query_norm, query_anchors, target_norm, target_anchors, config
+        prepared_query.bundle,
+        prepared_query.anchors,
+        prepared_target.bundle,
+        prepared_target.anchors,
+        config,
     )
     return ComparisonResult(
         String(modelname(query)),

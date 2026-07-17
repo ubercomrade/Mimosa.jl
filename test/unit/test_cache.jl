@@ -194,6 +194,64 @@ end
     @test length(key1) == 16
 end
 
+@testset "Prepared profile cache integration" begin
+    cache = Cache(joinpath(mktempdir(), "prepared_profiles"))
+    scores = ScoreProfile(
+        "scores",
+        build_ragged([Float32[0.1, 0.8, 0.3], Float32[0.4, 0.2]]),
+    )
+
+    score_key = prepared_profile_cache_key(cache, scores; min_logfpr=0.25f0)
+    first = prepare_profile(scores; min_logfpr=0.25f0, cache=cache)
+    @test cache_has(cache, score_key)
+    second = prepare_profile(scores; min_logfpr=0.25f0, cache=cache)
+    @test second.name == first.name
+    @test second.min_logfpr == first.min_logfpr
+    @test second.bundle.forward == first.bundle.forward
+    @test second.bundle.reverse == first.bundle.reverse
+    @test second.anchors[1].positions == first.anchors[1].positions
+    @test second.anchors[1].offsets == first.anchors[1].offsets
+    @test second.anchors[2].positions == first.anchors[2].positions
+    @test second.anchors[2].offsets == first.anchors[2].offsets
+    @test prepared_profile_cache_key(cache, scores; min_logfpr=0.0f0) != score_key
+
+    weights = Float32[
+        0.4 -0.2 0.1
+        -0.1 0.5 -0.3
+        0.2 -0.1 0.6
+        -0.4 0.1 -0.2
+        -0.5 -0.5 -0.5
+    ]
+    motif = PWM("motif", weights, (0.25f0, 0.25f0, 0.25f0, 0.25f0))
+    sequences = EncodedSequenceBatch(
+        UInt8[0, 1, 2, 3, 0, 1, 2, 3, 3, 2, 1, 0, 3, 2, 1, 0], [1, 9, 17]
+    )
+    background_a = EncodedSequenceBatch(UInt8[0, 0, 1, 1, 2, 2, 3, 3], [1, 9])
+    background_b = EncodedSequenceBatch(UInt8[3, 3, 2, 2, 1, 1, 0, 0], [1, 9])
+
+    key_a = prepared_profile_cache_key(
+        cache, motif, sequences; background=background_a, min_logfpr=0.0f0
+    )
+    key_b = prepared_profile_cache_key(
+        cache, motif, sequences; background=background_b, min_logfpr=0.0f0
+    )
+    @test prepared_profile_cache_key(cache, motif, sequences; min_logfpr=0.0f0) ==
+          prepared_profile_cache_key(cache, motif, sequences; background=sequences, min_logfpr=0.0f0)
+    @test key_a != key_b
+    prepared_a = prepare_profile(motif, sequences; background=background_a, cache=cache)
+    @test cache_has(cache, key_a)
+    cached_a = prepare_profile(motif, sequences; background=background_a, cache=cache)
+    @test cached_a.bundle.forward == prepared_a.bundle.forward
+    @test cached_a.anchors[1].positions == prepared_a.anchors[1].positions
+    @test cached_a.anchors[2].positions == prepared_a.anchors[2].positions
+
+    target = PWM("target", weights .+ 0.05f0, motif.background)
+    uncached = compare(motif, target, sequences; background=background_b, metric=:co)
+    cached = compare(motif, target, sequences; background=background_b, metric=:co, cache=cache)
+    @test cached == uncached
+    @test cache_has(cache, key_b)
+end
+
 @testset "Content fingerprint stability" begin
     # String fingerprints
     @test content_fingerprint("hello") == content_fingerprint("hello")

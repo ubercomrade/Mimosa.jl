@@ -171,6 +171,7 @@ export ExecutionPolicy, SerialExecution, ThreadedExecution
 # Cache exports (Stage 7)
 export Cache,
     cache_key,
+    prepared_profile_cache_key,
     cache_has,
     cache_get,
     cache_get_meta,

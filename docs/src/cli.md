@@ -68,6 +68,10 @@ Use `--fasta` for explicit scientific input or `--num-sequences`,
 separate normalization FASTA. `--pvalue` requires a compatible explicit
 `--null-distribution` bundle.
 
+Pass `--cache-dir .mimosa-cache` to `profile` to persist prepared profiles.
+A cache hit skips scanning, empirical normalization, and anchor collection when
+the model, sequences, background, and threshold are unchanged.
+
 ### `build-null`
 
 ```bash

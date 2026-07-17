@@ -44,6 +44,26 @@ end
     end
 end
 
+@testset "CLI profile: prepared-profile cache" begin
+    query = joinpath(EXAMPLES, "scores_1.fasta")
+    target = joinpath(EXAMPLES, "scores_2.fasta")
+    cache_dir = joinpath(mktempdir(), "mimosa-cache")
+    args = [
+        "profile",
+        query,
+        target,
+        "--model1-type",
+        "scores",
+        "--model2-type",
+        "scores",
+        "--cache-dir",
+        cache_dir,
+    ]
+    @test Mimosa.main(args) == 0
+    @test Mimosa.main(args) == 0
+    @test count(isdir, readdir(cache_dir; join=true)) == 2
+end
+
 @testset "CLI profile: help" begin
     @test Mimosa.main(["profile", "--help"]) == 0
 end

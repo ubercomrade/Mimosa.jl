@@ -39,6 +39,7 @@ const PROFILE_OPTIONS = Dict{String,Bool}(
     "seed" => true,
     "background-freq" => true,
     "threads" => true,
+    "cache-dir" => true,
     "null-distribution" => true,
     "effective-number-of-targets" => true,
 )
@@ -444,6 +445,7 @@ function _print_profile_help(io::IO)
         io,
         "  --threads <n>             Worker threads to use (default: 1; runtime must provide them)",
     )
+    println(io, "  --cache-dir <path>        Persist prepared profiles in this cache directory")
     println(io, "  --quiet                   Suppress informational output")
     println(io, "  --verbose                 Verbose diagnostics to stderr")
     return nothing
@@ -485,6 +487,7 @@ function _run_profile(parsed::CLIParsed)
     fasta = get(parsed.options, "fasta", nothing)
     bg_fasta = get(parsed.options, "background", nothing)
     execution = _execution_policy(parsed)
+    cache = haskey(parsed.options, "cache-dir") ? Cache(parsed.options["cache-dir"]) : nothing
 
     model1 = _read_typed_model(path1, type1; background=bg_freq)
     model2 = _read_typed_model(path2, type2; background=bg_freq)
@@ -501,6 +504,7 @@ function _run_profile(parsed::CLIParsed)
             window_radius=window_radius,
             realign_window=realign_window,
             min_logfpr=min_logfpr,
+            cache=cache,
         )
     else
         # Motif-derived profiles: scan → normalize → compare
@@ -517,6 +521,7 @@ function _run_profile(parsed::CLIParsed)
             min_logfpr=min_logfpr,
             background=bg_sequences,
             execution=execution,
+            cache=cache,
         )
     end
 
