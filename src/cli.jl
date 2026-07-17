@@ -164,6 +164,10 @@ function _validate_null_compatibility(
     metric::AbstractString,
     sequences::Union{Nothing,EncodedSequenceBatch}=nothing,
     background::Union{Nothing,EncodedSequenceBatch}=nothing,
+    search_range::Int=10,
+    window_radius::Int=10,
+    realign_window::Int=3,
+    min_logfpr::Float32=0.0f0,
 )
     dist.strategy == strategy || throw(
         CLIError(
@@ -175,6 +179,11 @@ function _validate_null_compatibility(
             "null distribution metric '$(dist.metric)' is incompatible with requested metric '$metric'.",
         ),
     )
+    contract = dist.contract
+    contract.search_range == search_range || throw(CLIError("null distribution search range is incompatible with this comparison."))
+    contract.window_radius == window_radius || throw(CLIError("null distribution window radius is incompatible with this comparison."))
+    contract.realign_window == realign_window || throw(CLIError("null distribution realignment window is incompatible with this comparison."))
+    contract.min_logfpr == min_logfpr || throw(CLIError("null distribution minimum log-FPR is incompatible with this comparison."))
 
     expected_sequences = isnothing(sequences) ? "none" : sequence_fingerprint(sequences)
     expected_background = isnothing(background) ? "none" : sequence_fingerprint(background)
@@ -198,13 +207,25 @@ function _annotate_cli_result(
     metric::AbstractString,
     sequences::Union{Nothing,EncodedSequenceBatch}=nothing,
     background::Union{Nothing,EncodedSequenceBatch}=nothing,
+    search_range::Int=10,
+    window_radius::Int=10,
+    realign_window::Int=3,
+    min_logfpr::Float32=0.0f0,
 )
     "pvalue" in parsed.flags || return result
     haskey(parsed.options, "null-distribution") ||
         throw(CLIError("--pvalue requires an explicit --null-distribution bundle."))
     dist = loadnull(parsed.options["null-distribution"])
     _validate_null_compatibility(
-        dist; strategy=strategy, metric=metric, sequences=sequences, background=background
+        dist;
+        strategy=strategy,
+        metric=metric,
+        sequences=sequences,
+        background=background,
+        search_range=search_range,
+        window_radius=window_radius,
+        realign_window=realign_window,
+        min_logfpr=min_logfpr,
     )
     effective = if haskey(parsed.options, "effective-number-of-targets")
         value = tryparse(Int, parsed.options["effective-number-of-targets"])
@@ -362,6 +383,10 @@ function _run_profile(parsed::CLIParsed)
         metric=metric,
         sequences=sequences,
         background=bg_sequences,
+        search_range=search_range,
+        window_radius=window_radius,
+        realign_window=realign_window,
+        min_logfpr=min_logfpr,
     )
     _println_json(to_dict(annotated))
     return 0

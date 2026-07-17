@@ -522,9 +522,9 @@ Check whether a cache entry exists and is valid (not corrupted).
 Returns `false` if the cache is disabled or the entry is missing/corrupted.
 """
 function cache_has(cache::Cache, key::AbstractString)
+    !cache.enabled && return false
     path = cache_path(cache, key)
     meta_path = cache_meta_path(cache, key)
-    !cache.enabled && return false
     isfile(path) && isfile(meta_path) || return false
     # Validate checksum
     return _validate_cache_entry(path, meta_path)
@@ -537,9 +537,9 @@ Read a cache entry's binary data. Returns `nothing` if the cache is disabled,
 the entry is missing, or the checksum does not match.
 """
 function cache_get(cache::Cache, key::AbstractString)
+    !cache.enabled && return nothing
     path = cache_path(cache, key)
     meta_path = cache_meta_path(cache, key)
-    !cache.enabled && return nothing
     isfile(path) && isfile(meta_path) || return nothing
     _validate_cache_entry(path, meta_path) || return nothing
     return read(path)
@@ -552,8 +552,8 @@ Read and parse the metadata (TOML) for a cache entry.
 Returns `nothing` if missing or cache disabled.
 """
 function cache_get_meta(cache::Cache, key::AbstractString)
-    meta_path = cache_meta_path(cache, key)
     !cache.enabled && return nothing
+    meta_path = cache_meta_path(cache, key)
     isfile(meta_path) || return nothing
     try
         return TOML.parsefile(meta_path)
@@ -576,8 +576,8 @@ function cache_set(
     data::AbstractVector{UInt8};
     metadata::Dict=Dict{String,Any}(),
 )
-    path = cache_path(cache, key)
     !cache.enabled && return nothing
+    path = cache_path(cache, key)
 
     checksum = bytes2hex(SHA.sha256(data))
     meta = Dict{String,Any}(
@@ -675,8 +675,8 @@ end
 Remove a single cache entry and its metadata.
 """
 function clearcache(cache::Cache, key::AbstractString)
-    value = _validate_cache_key(key)
     !cache.enabled && return 0
+    value = _validate_cache_key(key)
     isdir(cache.directory) || return 0
     return _with_cache_lock(cache) do
         entry = _cache_entry_dir(cache, value)

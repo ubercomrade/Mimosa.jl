@@ -27,8 +27,12 @@ include("serialization.jl")
 include("cli.jl")
 include("precompile.jl")
 
-function (@main)(args::Vector{String})
-    PROGRAM_FILE == string(nameof(@__MODULE__)) || return 0
+"""
+    main(args=ARGS)
+
+Run the Mimosa command-line interface and return its exit code.
+"""
+function (@main)(args::Vector{String}=ARGS)
     return cli_main(args)
 end
 
@@ -43,8 +47,7 @@ export readmodel,
     readsequences,
     compare,
     to_json,
-    to_dict,
-    main
+    to_dict
 export MimosaError,
     ModelFormatError, ModelDimensionError, InvariantError, ModelInterfaceError
 export AbstractProfileSource,

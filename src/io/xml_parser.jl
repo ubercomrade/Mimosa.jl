@@ -146,6 +146,8 @@ function _xml_parse_string(content::String, path::AbstractString)
     # Parse the root element
     root, pos = _xml_parse_element(content, pos, len, path)
     root === nothing && throw(ModelFormatError(path, "no root element found."))
+    pos = _xml_skip_whitespace_and_decls(content, pos, len)
+    pos > len || throw(ModelFormatError(path, "unexpected content after root element."))
     return root
 end
 
@@ -158,17 +160,17 @@ function _xml_skip_whitespace_and_decls(content::String, pos::Int, len::Int)
             # Skip XML declaration or processing instruction
             close_idx = findnext("?>", content, pos)
             close_idx === nothing && break
-            pos = close_idx + 2
+            pos = last(close_idx) + 1
         elseif _starts_at(content, pos, "<!--")
             # Skip comment
             close_idx = findnext("-->", content, pos)
             close_idx === nothing && break
-            pos = close_idx + 3
+            pos = last(close_idx) + 1
         elseif _starts_at(content, pos, "<!DOCTYPE")
             # Skip DOCTYPE
             close_idx = findnext(">", content, pos)
             close_idx === nothing && break
-            pos = close_idx
+            pos = last(close_idx) + 1
         else
             break
         end
@@ -191,7 +193,7 @@ function _xml_parse_element(content::String, pos::Int, len::Int, path::AbstractS
         # Skip comment or declaration
         close_idx = findnext(">", content, pos)
         close_idx === nothing && throw(ModelFormatError(path, "unclosed special tag."))
-        return nothing, close_idx
+        return nothing, last(close_idx) + 1
     end
 
     # Parse tag name
@@ -257,6 +259,7 @@ function _xml_parse_element(content::String, pos::Int, len::Int, path::AbstractS
     # Parse content (children and text)
     children = XMLElement[]
     text_parts = String[]
+    closed = false
 
     while pos <= len
         # Check for closing tag
@@ -274,12 +277,13 @@ function _xml_parse_element(content::String, pos::Int, len::Int, path::AbstractS
                 ModelFormatError(path, "mismatched tags: <$tag> closed by </$close_tag>."),
             )
             pos += 1
+            closed = true
             break
         elseif _starts_at(content, pos, "<!--")
             # Skip comment
             close_idx = findnext("-->", content, pos)
             close_idx === nothing && throw(ModelFormatError(path, "unclosed comment."))
-            pos = close_idx + 3
+            pos = last(close_idx) + 1
         elseif content[pos] == '<'
             # Child element
             child, pos = _xml_parse_element(content, pos, len, path)
@@ -300,6 +304,7 @@ function _xml_parse_element(content::String, pos::Int, len::Int, path::AbstractS
         end
     end
 
+    closed || throw(ModelFormatError(path, "unclosed <$tag>."))
     return XMLElement(tag, attrs, children, join(text_parts, " ")), pos
 end
 

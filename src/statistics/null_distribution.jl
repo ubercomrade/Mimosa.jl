@@ -79,6 +79,11 @@ function NullDistribution(
     sequence_fingerprint::String,
     background_fingerprint::String,
 )
+    n_null >= 0 || throw(InvariantError("null distribution n_null must be non-negative."))
+    n_null == length(raw_scores) || throw(
+        InvariantError("null distribution n_null does not match raw_scores length."),
+    )
+    n_queries >= 0 || throw(InvariantError("null distribution n_queries must be non-negative."))
     contract = ProfileComparisonContract(
         metric,
         10,

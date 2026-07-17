@@ -84,6 +84,7 @@ function read_sitega(path::AbstractString)
     lpd_count = tryparse(Int, lpd_parts[1])
     lpd_count === nothing &&
         throw(ModelFormatError(path, "invalid LPD count: $(lpd_parts[1])."))
+    lpd_count >= 0 || throw(ModelFormatError(path, "LPD count must be non-negative."))
 
     # Line 3: model length
     length(lines) < 3 && throw(ModelFormatError(path, "missing model length line."))
@@ -110,10 +111,12 @@ function read_sitega(path::AbstractString)
     fill!(rep, 0.0f0)
 
     # Parse segment lines (starting from line 6, index 6 in 1-based)
+    parsed_segments = 0
     for (line_idx, line) in enumerate(lines[6:end])
         stripped = strip(line)
         isempty(stripped) && continue
 
+        parsed_segments += 1
         parts = split(stripped)
         if length(parts) != 5
             throw(
@@ -162,6 +165,12 @@ function read_sitega(path::AbstractString)
         end
     end
 
+    parsed_segments == lpd_count || throw(
+        ModelFormatError(
+            path,
+            "LPD count $lpd_count does not match parsed segment count $parsed_segments.",
+        ),
+    )
     if !all(isfinite, rep)
         throw(ModelFormatError(path, "representation contains non-finite values."))
     end
