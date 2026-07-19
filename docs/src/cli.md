@@ -69,14 +69,16 @@ the model, sequences, background, and threshold are unchanged.
 
 ```bash
 julia -m Mimosa build-null motifs/ \
-  --model-type pwm --groups groups.tsv --output output/null_bundle \
-  --fasta examples/foreground.fa --metric co
+  --model-type pwm --output output/null_bundle \
+  --fasta examples/foreground.fa --metric co \
+  --num-samples 2000 --shuffle --seed 127
 ```
 
-The relation file is TSV/CSV with configurable motif-name and group columns.
-Only cross-group eligible pairs are compared. `--strict` and
-`--min-null-targets` control insufficient-target handling. The output is always
-a version-4 profile null bundle. `--jobs` is a deprecated alias for `--threads`.
+The input must be a directory containing at least two models of the selected
+type. Each iteration samples two distinct ordered models. `--shuffle` permutes
+PWM columns and independently permutes A/C/G/T weights inside every column;
+for other model types it currently has no effect. The output is always a
+version-5 profile null bundle. `--jobs` is a deprecated alias for `--threads`.
 
 ### `cache clear`
 

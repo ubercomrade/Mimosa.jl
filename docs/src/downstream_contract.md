@@ -21,7 +21,9 @@ results = compare(prepared, targets; execution=ThreadedExecution(4))
 sites = selectsites(model, batch, selector; execution=SerialExecution())
 pfm = reconstruct_pfm(model, batch, selector; execution=SerialExecution())
 
-null_result = build_null(models, relations; sequences=batch, metric=:co)
+null_result = build_null(
+    models; sequences=batch, metric=:co, n_samples=2000, shuffle=true, seed=127
+)
 savenull(path, null_result.distribution)
 dist = loadnull(path)
 annotated = annotate_results(results, dist)

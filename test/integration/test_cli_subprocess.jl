@@ -22,9 +22,7 @@ end
     code = _run_exitcode(`$(Base.julia_cmd()) --project=$(REPO_ROOT) -m Mimosa --help`)
     @test code == 0
 
-    code = _run_exitcode(
-        `$(Base.julia_cmd()) --project=$(REPO_ROOT) -m Mimosa --version`
-    )
+    code = _run_exitcode(`$(Base.julia_cmd()) --project=$(REPO_ROOT) -m Mimosa --version`)
     @test code == 0
 
     code = _run_exitcode(`$(Base.julia_cmd()) --project=$(REPO_ROOT) -m Mimosa -h`)
@@ -33,9 +31,7 @@ end
     code = _run_exitcode(`$(Base.julia_cmd()) --project=$(REPO_ROOT) -m Mimosa -V`)
     @test code == 0
 
-    code = _run_exitcode(
-        `$(Base.julia_cmd()) --project=$(REPO_ROOT) -m Mimosa --version`
-    )
+    code = _run_exitcode(`$(Base.julia_cmd()) --project=$(REPO_ROOT) -m Mimosa --version`)
     @test code == 0
 end
 
@@ -65,12 +61,10 @@ end
 @testset "CLI subprocess: build-null profile strategy" begin
     dir = mktempdir()
     coll_dir = _copy_motif_collection(dir, EXAMPLES)
-    groups_path = joinpath(dir, "groups.tsv")
-    write(groups_path, "motif\tgroup\nMA0047.3\tA\nMA0036.2\tB\nMA0482.2\tC\n")
     output_path = joinpath(dir, "null")
 
     code = _run_exitcode(
-        `$(Base.julia_cmd()) --project=$(REPO_ROOT) -m Mimosa build-null $(coll_dir) --model-type pwm --groups $(groups_path) --metric co --num-sequences 50 --seq-length 100 --seed 42 --output $(output_path)`,
+        `$(Base.julia_cmd()) --project=$(REPO_ROOT) -m Mimosa build-null $(coll_dir) --model-type pwm --metric co --num-samples 12 --shuffle --num-sequences 50 --seq-length 100 --seed 42 --output $(output_path)`,
     )
     @test code == 0
     @test isfile(joinpath(output_path, "manifest.toml"))

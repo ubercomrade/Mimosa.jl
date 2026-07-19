@@ -14,9 +14,9 @@
     NULL_FORMAT_VERSION
 
 Current version of the portable null-distribution bundle format.
-Value is `4`. Bundles with a different version are rejected on load.
+Value is `5`. Bundles with a different version are rejected on load.
 """
-const NULL_FORMAT_VERSION = 4
+const NULL_FORMAT_VERSION = 5
 
 """
     savenull(path, dist::NullDistribution)
@@ -31,8 +31,13 @@ function savenull(path::AbstractString, dist::NullDistribution)
         throw(InvariantError("null distribution n_null does not match raw_scores length."))
     length(dist.pairs) == dist.n_null ||
         throw(InvariantError("null distribution pairs do not match n_null."))
-    dist.n_queries >= 0 ||
-        throw(InvariantError("null distribution n_queries must be non-negative."))
+    dist.n_models >= 2 ||
+        throw(InvariantError("null distribution requires at least two source models."))
+    isempty(dist.model_type) &&
+        throw(InvariantError("null distribution model_type must not be empty."))
+    dist.seed >= 0 || throw(InvariantError("null distribution seed must be non-negative."))
+    isempty(dist.sampling_version) &&
+        throw(InvariantError("null distribution sampling_version must not be empty."))
     isempty(dist.strategy) &&
         throw(InvariantError("null distribution strategy must not be empty."))
     isempty(dist.metric) &&
@@ -85,12 +90,14 @@ function savenull(path::AbstractString, dist::NullDistribution)
             "genextreme_iterations" => iterations,
             "genextreme_loglikelihood" => loglikelihood,
             "n_null" => dist.n_null,
-            "n_queries" => dist.n_queries,
+            "n_models" => dist.n_models,
+            "model_type" => dist.model_type,
+            "shuffle" => dist.shuffle,
+            "seed" => dist.seed,
+            "sampling_version" => dist.sampling_version,
             "pairs" => [
                 Dict("query" => pair.query, "target" => pair.target, "score" => pair.score) for pair in dist.pairs
             ],
-            "skipped" =>
-                [Dict("query" => s.query, "reason" => s.reason) for s in dist.skipped],
             "compatibility" => Dict{String,Any}(
                 "format_version" => NULL_FORMAT_VERSION,
                 "strategy" => dist.strategy,
@@ -103,11 +110,9 @@ function savenull(path::AbstractString, dist::NullDistribution)
                     else
                         dist.model_collection_fingerprint
                     end,
-                "relation_fingerprint" => if dist.relation_fingerprint === nothing
-                    "none"
-                else
-                    dist.relation_fingerprint
-                end,
+                "model_type" => dist.model_type,
+                "shuffle" => dist.shuffle,
+                "sampling_version" => dist.sampling_version,
                 "search_range" => dist.contract.search_range,
                 "window_radius" => dist.contract.window_radius,
                 "realign_window" => dist.contract.realign_window,
@@ -155,13 +160,21 @@ function loadnull(path::AbstractString)
             minimum=0,
             maximum=MAX_BUNDLE_ELEMENTS,
         )
-        n_queries = _required_manifest_int(
+        n_models = _required_manifest_int(
             manifest,
-            "n_queries",
+            "n_models",
             path,
             "null manifest";
-            minimum=0,
+            minimum=2,
             maximum=MAX_BUNDLE_ELEMENTS,
+        )
+        model_type = _required_manifest_string(
+            manifest, "model_type", path, "null manifest"
+        )
+        shuffle = _required_manifest_bool(manifest, "shuffle", path, "null manifest")
+        seed = _required_manifest_int(manifest, "seed", path, "null manifest"; minimum=0)
+        sampling_version = _required_manifest_string(
+            manifest, "sampling_version", path, "null manifest"
         )
 
         arrays = _required_manifest_table(manifest, "arrays", path, "null manifest")
@@ -216,18 +229,6 @@ function loadnull(path::AbstractString)
             throw(_bundle_error(path, "unsupported estimator_type '$estimator_type'."))
         end
 
-        skipped_raw = get(manifest, "skipped", nothing)
-        skipped_raw isa AbstractVector ||
-            throw(_bundle_error(path, "null manifest 'skipped' must be an array."))
-        skipped = NamedTuple{(:query, :reason),Tuple{String,String}}[]
-        for (index, item) in enumerate(skipped_raw)
-            item isa AbstractDict ||
-                throw(_bundle_error(path, "skipped entry $index must be a TOML table."))
-            query = _required_manifest_string(item, "query", path, "skipped entry $index")
-            reason = _required_manifest_string(item, "reason", path, "skipped entry $index")
-            push!(skipped, (query=query, reason=reason))
-        end
-
         pairs_raw = get(manifest, "pairs", nothing)
         pairs_raw isa AbstractVector ||
             throw(_bundle_error(path, "null manifest 'pairs' must be an array."))
@@ -274,8 +275,25 @@ function loadnull(path::AbstractString)
         mcf = _required_manifest_string(
             compat, "model_collection_fingerprint", path, "compatibility metadata"
         )
-        rf = _required_manifest_string(
-            compat, "relation_fingerprint", path, "compatibility metadata"
+        compat_model_type = _required_manifest_string(
+            compat, "model_type", path, "compatibility metadata"
+        )
+        compat_model_type == model_type || throw(
+            _bundle_error(path, "compatibility model type disagrees with null manifest."),
+        )
+        compat_shuffle = _required_manifest_bool(
+            compat, "shuffle", path, "compatibility metadata"
+        )
+        compat_shuffle == shuffle || throw(
+            _bundle_error(path, "compatibility shuffle flag disagrees with null manifest."),
+        )
+        compat_sampling_version = _required_manifest_string(
+            compat, "sampling_version", path, "compatibility metadata"
+        )
+        compat_sampling_version == sampling_version || throw(
+            _bundle_error(
+                path, "compatibility sampling version disagrees with null manifest."
+            ),
         )
         search_range = _required_manifest_int(
             compat, "search_range", path, "compatibility metadata"; minimum=0
@@ -321,10 +339,12 @@ function loadnull(path::AbstractString)
             raw_scores,
             pairs,
             n_null,
-            n_queries,
-            skipped,
+            n_models,
+            model_type,
+            shuffle,
+            seed,
+            sampling_version,
             mcf != "none" ? mcf : nothing,
-            rf != "none" ? rf : nothing,
             seq_fp,
             bg_fp,
             contract,

@@ -262,21 +262,19 @@ end
     pwm1 = readmodel(joinpath(EXAMPLES, "pif4.meme"))
     pwm2 = readmodel(joinpath(EXAMPLES, "foxa2.meme"))
 
-    relations_str = "motif\tgroup\n$(pwm1.name)\tA\n$(pwm2.name)\tB\n"
-    rel_path = joinpath(mktempdir(), "groups.tsv")
-    write(rel_path, relations_str)
-    relations = parse_group_relations(rel_path)
-
     models = [pwm1, pwm2]
     sequences = make_random_sequences(4, 80; seed=13)
-    result = build_null(models, relations; sequences=sequences, metric=:co)
+    result = build_null(
+        models; sequences=sequences, metric=:co, n_samples=8, shuffle=true, seed=13
+    )
     @test result isa NullBuildResult
     dist = result.distribution
     @test dist isa NullDistribution
     @test dist.strategy == "profile"
     @test dist.metric == "co"
     @test dist.model_collection_fingerprint !== nothing
-    @test dist.relation_fingerprint !== nothing
+    @test dist.model_type == "pwm"
+    @test dist.shuffle
     @test dist.sequence_fingerprint == sequence_fingerprint(sequences)
     @test dist.background_fingerprint == "none"
 
@@ -337,13 +335,10 @@ end
         PWM("m4", weights_d, bg),
     ]
 
-    relations_str = "motif\tgroup\nm1\tA\nm2\tB\nm3\tA\nm4\tB\n"
-    rel_path = joinpath(mktempdir(), "groups.tsv")
-    write(rel_path, relations_str)
-    relations = parse_group_relations(rel_path)
-
     sequences = make_random_sequences(6, 80; seed=14)
-    null_result = build_null(models, relations; sequences=sequences, metric=:co)
+    null_result = build_null(
+        models; sequences=sequences, metric=:co, n_samples=16, shuffle=true, seed=14
+    )
     dist = null_result.distribution
     @test dist.n_null >= 3  # GEV fit requires at least 3 scores
 

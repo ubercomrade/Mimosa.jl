@@ -241,22 +241,20 @@ before counting, so PFM columns are in canonical motif orientation.
 
 ## Significance with a null distribution
 
-A profile null compares eligible cross-group pairs and fits a GEV distribution.
-The relation table must contain `motif` and `group` columns (TSV, CSV, or
-semicolon-separated input). It is parsed into a `GroupRelations` value:
+A profile null samples distinct ordered model pairs with replacement and fits a
+GEV distribution to their comparison scores. PWM models can be independently
+shuffled before every comparison:
 
 ```julia
 models = [query, target, readmodel("examples/foxa2.meme")]
-relations = parse_group_relations(
-    "groups.tsv";
-    known_names=Set(modelname(model) for model in models),
-)
 
 built = build_null(
     models,
-    relations;
     sequences,
     metric=:co,
+    n_samples=2000,
+    shuffle=true,
+    seed=127,
 )
 savenull("output/null_bundle", built.distribution)
 
@@ -266,10 +264,11 @@ println(to_json(first(annotated)))
 ```
 
 `annotate_results` adds p-values, Benjamini–Hochberg adjusted p-values, and
-E-values. Null bundles are profile-only and use format version 4. They are
+E-values. Null bundles are profile-only and use format version 5. They are
 compatible only with the same metric, comparison settings, sequences,
-background, and model/relation fingerprints; rebuild a bundle when those
-inputs change. See [Storage Format](storage.md) for the portable layout.
+background, and model family. The manifest records the source-model fingerprint,
+sampling seed, shuffle flag, and sampling algorithm version. See
+[Storage Format](storage.md) for the portable layout.
 
 ## Errors and troubleshooting
 

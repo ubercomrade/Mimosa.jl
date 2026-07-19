@@ -24,7 +24,7 @@ Use `writemodel(path, model)` and `readmodel(path)`.
 
 ## Null Bundles
 
-Null bundles use format version 4:
+Null bundles use format version 5:
 
 ```text
 null_bundle/
@@ -34,8 +34,9 @@ null_bundle/
 ```
 
 The strategy is always `"profile"`. The manifest stores the profile metric,
-Float64 GEV metadata, comparison counts, skipped queries, compatibility
-fingerprints, and the checksum/shape declaration for raw scores.
+Float64 GEV metadata, sampled pairs, model type and count, sampling seed,
+shuffle flag, algorithm version, compatibility fingerprints, and the
+checksum/shape declaration for raw scores.
 
 Use `savenull(path, distribution)` and `loadnull(path)`.
 
@@ -55,5 +56,5 @@ Writers build a complete sibling staging directory and commit it by rename.
 Failed writes do not replace valid targets; orphan stages are ignored.
 
 Any schema change requires a version increment, compatibility/migration checks,
-tests, and updated documentation. Null-bundle format version 4 intentionally
+tests, and updated documentation. Null-bundle format version 5 intentionally
 rejects all older bundles; rebuild them before reuse.

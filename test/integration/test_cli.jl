@@ -190,10 +190,6 @@ end
     cp(joinpath(EXAMPLES, "gata2.meme"), joinpath(coll_dir, "gata2.meme"))
     cp(joinpath(EXAMPLES, "gata4.meme"), joinpath(coll_dir, "gata4.meme"))
 
-    # Create groups TSV with motif names in different groups
-    groups_path = joinpath(dir, "groups.tsv")
-    write(groups_path, "motif\tgroup\nMA0047.3\tA\nMA0036.2\tB\nMA0482.2\tC\n")
-
     output_path = joinpath(dir, "null")
 
     code = Mimosa.main([
@@ -201,10 +197,11 @@ end
         coll_dir,
         "--model-type",
         "pwm",
-        "--groups",
-        groups_path,
         "--metric",
         "co",
+        "--num-samples",
+        "12",
+        "--shuffle",
         "--num-sequences",
         "100",
         "--seq-length",
@@ -263,8 +260,6 @@ end
 @testset "CLI build-null: profile strategy passes FASTA and metric" begin
     dir = mktempdir()
     coll_dir = _copy_motif_collection(dir, EXAMPLES)
-    groups_path = joinpath(dir, "groups.tsv")
-    write(groups_path, "motif\tgroup\nMA0047.3\tA\nMA0036.2\tB\nMA0482.2\tC\n")
     output_path = joinpath(dir, "profile_null")
 
     code = Mimosa.main([
@@ -272,10 +267,10 @@ end
         coll_dir,
         "--model-type",
         "pwm",
-        "--groups",
-        groups_path,
         "--metric",
         "dice",
+        "--num-samples",
+        "12",
         "--fasta",
         joinpath(EXAMPLES, "foreground.fa"),
         "--search-range",
@@ -328,8 +323,6 @@ end
         "motifs.meme",
         "--model-type",
         "pwm",
-        "--groups",
-        "groups.tsv",
         "--metric",
         "pcc",
         "--output",
@@ -341,8 +334,6 @@ end
 @testset "CLI build-null: threads alias works" begin
     dir = mktempdir()
     coll_dir = _copy_motif_collection(dir, EXAMPLES)
-    groups_path = joinpath(dir, "groups.tsv")
-    write(groups_path, "motif\tgroup\nMA0047.3\tA\nMA0036.2\tB\nMA0482.2\tC\n")
     output_path = joinpath(dir, "null_threaded")
 
     # --jobs alias should work same as --threads
@@ -351,10 +342,10 @@ end
         coll_dir,
         "--model-type",
         "pwm",
-        "--groups",
-        groups_path,
         "--metric",
         "co",
+        "--num-samples",
+        "8",
         "--output",
         output_path,
         "--jobs",
@@ -393,21 +384,25 @@ end
 
     models = [m1, m2, m3]
 
-    tsv_content = "motif\tgroup\nm1\tA\nm2\tB\nm3\tC\n"
-    dir = mktempdir()
-    rel_path = joinpath(dir, "relations.tsv")
-    write(rel_path, tsv_content)
-    relations = parse_group_relations(rel_path; known_names=Set(["m1", "m2", "m3"]))
-
     sequences = make_random_sequences(2, 30; seed=7)
     serial_result = build_null(
-        models, relations; sequences=sequences, execution=SerialExecution()
+        models;
+        sequences=sequences,
+        n_samples=12,
+        shuffle=true,
+        seed=19,
+        execution=SerialExecution(),
     )
     serial_scores = serial_result.distribution.raw_scores
 
     for nt in (1, 2, 4)
         threaded_result = build_null(
-            models, relations; sequences=sequences, execution=ThreadedExecution(nt)
+            models;
+            sequences=sequences,
+            n_samples=12,
+            shuffle=true,
+            seed=19,
+            execution=ThreadedExecution(nt),
         )
         threaded_scores = threaded_result.distribution.raw_scores
         @test threaded_scores == serial_scores

@@ -93,16 +93,14 @@ serialization is available for comparison results, not site collections.
 
 ```julia
 models = [query, target, readmodel("examples/foxa2.meme")]
-relations = parse_group_relations(
-    "groups.tsv";
-    known_names=Set(modelname(model) for model in models),
-)
 
 null_result = build_null(
-    models,
-    relations;
+    models;
     sequences=sequences,
     metric=:co,
+    n_samples=2000,
+    shuffle=true,
+    seed=127,
 )
 
 dist = null_result.distribution
@@ -111,7 +109,7 @@ loaded = loadnull("output/null_bundle")
 annotated = annotate_results([comparison], loaded; effective_number_of_targets=1)
 ```
 
-Null bundles use format version 4 and strategy `"profile"` only. Older bundles must be rebuilt.
+Null bundles use format version 5 and strategy `"profile"` only. Older bundles must be rebuilt.
 
 ## Threaded Execution
 

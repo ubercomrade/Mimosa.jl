@@ -50,7 +50,6 @@ function CLIParsed(command::String)
     return CLIParsed(command, String[], Dict{String,String}(), Set{String}())
 end
 
-
 # ── Type and model resolution ────────────────────────────────────────────────
 #
 # Shared helpers used by command runners to read models and resolve sequences.
@@ -168,6 +167,7 @@ function _validate_null_compatibility(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Float32=0.0f0,
+    model_types::Union{Nothing,Tuple{String,String}}=nothing,
 )
     dist.strategy == strategy || throw(
         CLIError(
@@ -180,10 +180,20 @@ function _validate_null_compatibility(
         ),
     )
     contract = dist.contract
-    contract.search_range == search_range || throw(CLIError("null distribution search range is incompatible with this comparison."))
-    contract.window_radius == window_radius || throw(CLIError("null distribution window radius is incompatible with this comparison."))
-    contract.realign_window == realign_window || throw(CLIError("null distribution realignment window is incompatible with this comparison."))
-    contract.min_logfpr == min_logfpr || throw(CLIError("null distribution minimum log-FPR is incompatible with this comparison."))
+    contract.search_range == search_range || throw(
+        CLIError("null distribution search range is incompatible with this comparison.")
+    )
+    contract.window_radius == window_radius || throw(
+        CLIError("null distribution window radius is incompatible with this comparison."),
+    )
+    contract.realign_window == realign_window || throw(
+        CLIError(
+            "null distribution realignment window is incompatible with this comparison."
+        ),
+    )
+    contract.min_logfpr == min_logfpr || throw(
+        CLIError("null distribution minimum log-FPR is incompatible with this comparison."),
+    )
 
     expected_sequences = isnothing(sequences) ? "none" : sequence_fingerprint(sequences)
     expected_background = isnothing(background) ? "none" : sequence_fingerprint(background)
@@ -197,6 +207,13 @@ function _validate_null_compatibility(
             "null distribution background fingerprint is incompatible with this comparison.",
         ),
     )
+    if model_types !== nothing
+        all(==(dist.model_type), model_types) || throw(
+            CLIError(
+                "null distribution model type '$(dist.model_type)' is incompatible with compared model types '$(join(model_types, ", "))'.",
+            ),
+        )
+    end
     return nothing
 end
 
@@ -211,6 +228,7 @@ function _annotate_cli_result(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Float32=0.0f0,
+    model_types::Union{Nothing,Tuple{String,String}}=nothing,
 )
     "pvalue" in parsed.flags || return result
     haskey(parsed.options, "null-distribution") ||
@@ -226,6 +244,7 @@ function _annotate_cli_result(
         window_radius=window_radius,
         realign_window=realign_window,
         min_logfpr=min_logfpr,
+        model_types=model_types,
     )
     effective = if haskey(parsed.options, "effective-number-of-targets")
         value = tryparse(Int, parsed.options["effective-number-of-targets"])
@@ -296,7 +315,9 @@ function _print_profile_help(io::IO)
         io,
         "  --threads <n>             Worker threads to use (default: 1; runtime must provide them)",
     )
-    println(io, "  --cache-dir <path>        Persist prepared profiles in this cache directory")
+    println(
+        io, "  --cache-dir <path>        Persist prepared profiles in this cache directory"
+    )
     println(io, "  --quiet                   Suppress informational output")
     println(io, "  --verbose                 Verbose diagnostics to stderr")
     return nothing
@@ -338,7 +359,8 @@ function _run_profile(parsed::CLIParsed)
     fasta = get(parsed.options, "fasta", nothing)
     bg_fasta = get(parsed.options, "background", nothing)
     execution = _execution_policy(parsed)
-    cache = haskey(parsed.options, "cache-dir") ? Cache(parsed.options["cache-dir"]) : nothing
+    cache =
+        haskey(parsed.options, "cache-dir") ? Cache(parsed.options["cache-dir"]) : nothing
 
     model1 = _read_typed_model(path1, type1; background=bg_freq)
     model2 = _read_typed_model(path2, type2; background=bg_freq)
@@ -387,6 +409,7 @@ function _run_profile(parsed::CLIParsed)
         window_radius=window_radius,
         realign_window=realign_window,
         min_logfpr=min_logfpr,
+        model_types=(type1, type2),
     )
     _println_json(to_dict(annotated))
     return 0
@@ -397,24 +420,15 @@ end
 function _print_build_null_help(io::IO)
     println(
         io,
-        "Usage: mimosa build-null <motifs> --model-type <type> --groups <path> --output <path> [options]",
+        "Usage: mimosa build-null <motifs-dir> --model-type <type> --output <path> [options]",
     )
     println(io, "")
     println(io, "Build a pooled null distribution from unrelated motif comparisons.")
     println(io, "")
     println(io, "Required arguments:")
-    println(
-        io,
-        "  motifs                    Motif collection: directory or multi-motif MEME file",
-    )
+    println(io, "  motifs-dir                Directory containing motif files")
     println(io, "  --model-type <type>       Motif format: $(join(MODEL_TYPES, ", "))")
-    println(io, "  --groups <path>           TSV/CSV with motif and group columns")
     println(io, "  --output <path>           Output path for null distribution")
-    println(io, "")
-    println(io, "Relation options:")
-    println(io, "  --name-column <s>         Motif-name column (default: motif)")
-    println(io, "  --group-column <s>        Group column (default: group)")
-    println(io, "  --ignore-missing          Ignore relation names not loaded")
     println(io, "")
     println(io, "Comparison options:")
     println(io, "  --metric <name>           Profile metric (default: co)")
@@ -422,14 +436,12 @@ function _print_build_null_help(io::IO)
     println(io, "  --num-sequences <n>       Random sequences (default: 1000)")
     println(io, "  --seq-length <n>          Random sequence length (default: 200)")
     println(io, "  --seed <n>                Random seed (default: 127)")
+    println(io, "  --num-samples <n>         Random comparisons (default: 2000)")
+    println(io, "  --shuffle                 Shuffle PWM models before each comparison")
     println(io, "  --search-range <n>        Max shift (default: 10)")
     println(io, "  --window-radius <n>       Window radius (default: 10)")
     println(io, "  --realign-window <n>      Realignment window (default: 3)")
     println(io, "  --min-logfpr <f>          Threshold logFPR")
-    println(io, "")
-    println(io, "Output options:")
-    println(io, "  --strict                  Fail when a query lacks enough null targets")
-    println(io, "  --min-null-targets <n>    Minimum null targets (default: 1)")
     println(io, "")
     println(io, "Technical options:")
     println(
@@ -497,23 +509,19 @@ function _run_build_null(parsed::CLIParsed)
     motifs_path = parsed.positional[1]
 
     haskey(parsed.options, "model-type") || throw(CLIError("--model-type is required."))
-    haskey(parsed.options, "groups") || throw(CLIError("--groups is required."))
     haskey(parsed.options, "output") || throw(CLIError("--output is required."))
+    isdir(motifs_path) || throw(CLIError("motif collection path must be a directory."))
 
     model_type = parsed.options["model-type"]
     model_type in MODEL_TYPES ||
         throw(CLIError("--model-type must be one of: $(join(MODEL_TYPES, ", "))"))
 
-    groups_path = parsed.options["groups"]
     output_path = parsed.options["output"]
-    name_col = get(parsed.options, "name-column", "motif")
-    group_col = get(parsed.options, "group-column", "group")
-    ignore_missing = "ignore-missing" in parsed.flags
-    strict = "strict" in parsed.flags
-    min_null = tryparse(Int, get(parsed.options, "min-null-targets", "1"))
-    seed = tryparse(Int, get(parsed.options, "seed", "127"))
-    num_seq = tryparse(Int, get(parsed.options, "num-sequences", "1000"))
-    seq_len = tryparse(Int, get(parsed.options, "seq-length", "200"))
+    seed = _cli_int(parsed, "seed", "127"; minimum=0)
+    n_samples = _cli_int(parsed, "num-samples", "2000"; minimum=1)
+    num_seq = _cli_int(parsed, "num-sequences", "1000"; minimum=1)
+    seq_len = _cli_int(parsed, "seq-length", "200"; minimum=1)
+    shuffle = "shuffle" in parsed.flags
     fasta = get(parsed.options, "fasta", nothing)
 
     metric = get(parsed.options, "metric", "co")
@@ -522,23 +530,6 @@ function _run_build_null(parsed::CLIParsed)
 
     # Read models
     models = _read_model_collection(motifs_path, model_type)
-    known_names = Set(modelname(m) for m in models)
-    relations = parse_group_relations(
-        groups_path;
-        name_column=name_col,
-        group_column=group_col,
-        ignore_missing=ignore_missing,
-        known_names=known_names,
-    )
-
-    min_null === nothing &&
-        throw(CLIError("--min-null-targets must be a positive integer."))
-    min_null > 0 || throw(CLIError("--min-null-targets must be a positive integer."))
-    seed === nothing && throw(CLIError("--seed must be an integer."))
-    num_seq === nothing && throw(CLIError("--num-sequences must be a positive integer."))
-    num_seq > 0 || throw(CLIError("--num-sequences must be a positive integer."))
-    seq_len === nothing && throw(CLIError("--seq-length must be a positive integer."))
-    seq_len > 0 || throw(CLIError("--seq-length must be a positive integer."))
 
     search_range = tryparse(Int, get(parsed.options, "search-range", "10"))
     window_radius = tryparse(Int, get(parsed.options, "window-radius", "10"))
@@ -565,11 +556,11 @@ function _run_build_null(parsed::CLIParsed)
         first(readsequences(fasta))
     end
     result = build_null(
-        models,
-        relations;
+        models;
         metric=metric,
-        min_null_targets=min_null,
-        strict=strict,
+        n_samples=n_samples,
+        shuffle=shuffle,
+        seed=seed,
         execution=exec_policy,
         sequences=sequences,
         search_range=search_range,
@@ -587,7 +578,9 @@ function _run_build_null(parsed::CLIParsed)
         "n_models" => length(models),
         "n_comparisons" => result.total_comparisons,
         "n_null" => result.distribution.n_null,
-        "n_queries" => result.distribution.n_queries,
+        "model_type" => result.distribution.model_type,
+        "shuffle" => result.distribution.shuffle,
+        "seed" => result.distribution.seed,
         "metric" => result.distribution.metric,
         "strategy" => result.distribution.strategy,
     )
@@ -650,16 +643,16 @@ end
 function _add_common_flags!(settings)
     @add_arg_table! settings begin
         "--quiet"
-            action = :store_true
-            help = "suppress informational output"
+        action = :store_true
+        help = "suppress informational output"
         "--verbose"
-            action = :store_true
-            help = "enable verbose diagnostics"
+        action = :store_true
+        help = "enable verbose diagnostics"
     end
 end
 
 function _cli_settings()
-    settings = ArgParseSettings(
+    settings = ArgParseSettings(;
         prog="mimosa",
         description="Motif comparison and statistical evaluation.",
         version="mimosa $(CLI_VERSION)",
@@ -668,30 +661,30 @@ function _cli_settings()
     settings.exc_handler = (_, err) -> throw(CLIError(err.text))
     @add_arg_table! settings begin
         "--version", "-V"
-            action = :show_version
+        action = :show_version
         "profile"
-            action = :command
-            help = "compare two motif score profiles"
+        action = :command
+        help = "compare two motif score profiles"
         "build-null"
-            action = :command
-            help = "build a null distribution from motif comparisons"
+        action = :command
+        help = "build a null distribution from motif comparisons"
         "cache"
-            action = :command
-            help = "manage the disk cache"
+        action = :command
+        help = "manage the disk cache"
     end
 
     profile = settings["profile"]
     @add_arg_table! profile begin
         "model1"
-            help = "first model or score-profile file"
-            required = true
+        help = "first model or score-profile file"
+        required = true
         "model2"
-            help = "second model or score-profile file"
-            required = true
+        help = "second model or score-profile file"
+        required = true
         "--model1-type"
-            required = true
+        required = true
         "--model2-type"
-            required = true
+        required = true
         "--metric"
         "--search-range"
         "--window-radius"
@@ -708,47 +701,41 @@ function _cli_settings()
         "--null-distribution"
         "--effective-number-of-targets"
         "--pvalue"
-            action = :store_true
+        action = :store_true
     end
     _add_common_flags!(profile)
 
     build_null = settings["build-null"]
     @add_arg_table! build_null begin
         "motifs"
-            help = "motif collection path"
-            required = true
+        help = "motif collection path"
+        required = true
         "--model-type"
-            required = true
-        "--groups"
-            required = true
+        required = true
         "--output"
-            required = true
-        "--name-column"
-        "--group-column"
+        required = true
         "--metric"
         "--fasta"
         "--num-sequences"
         "--seq-length"
         "--seed"
+        "--num-samples"
         "--search-range"
         "--window-radius"
         "--realign-window"
         "--min-logfpr"
-        "--min-null-targets"
         "--threads"
         "--jobs"
-        "--ignore-missing"
-            action = :store_true
-        "--strict"
-            action = :store_true
+        "--shuffle"
+        action = :store_true
     end
     _add_common_flags!(build_null)
 
     cache = settings["cache"]
     @add_arg_table! cache begin
         "operation"
-            help = "cache operation (clear)"
-            required = true
+        help = "cache operation (clear)"
+        required = true
         "--cache-dir"
         "--threads"
     end

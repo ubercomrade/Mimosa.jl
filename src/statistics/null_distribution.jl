@@ -42,10 +42,12 @@ Fields:
 - `raw_scores::Vector{Float64}`: pooled raw comparison scores.
 - `pairs::Vector{NullPair}`: contributing comparison pairs.
 - `n_null::Int`: number of null comparisons.
-- `n_queries::Int`: number of queries used.
-- `skipped::Vector{NamedTuple{(:query, :reason),Tuple{String,String}}}`: skipped queries.
+- `n_models::Int`: number of source models.
+- `model_type::String`: model family used to build the null.
+- `shuffle::Bool`: whether PWM shuffling was enabled.
+- `seed::Int`: seed used for pair sampling and shuffling.
+- `sampling_version::String`: random sampling algorithm version.
 - `model_collection_fingerprint::Union{Nothing,String}`: SHA-256 of model collection.
-- `relation_fingerprint::Union{Nothing,String}`: SHA-256 of relation data.
 - `sequence_fingerprint::String`: fingerprint of sequences (or `"none"`).
 - `background_fingerprint::String`: fingerprint of background (or `"none"`).
 """
@@ -56,10 +58,12 @@ struct NullDistribution
     raw_scores::Vector{Float64}
     pairs::Vector{NullPair}
     n_null::Int
-    n_queries::Int
-    skipped::Vector{NamedTuple{(:query, :reason),Tuple{String,String}}}
+    n_models::Int
+    model_type::String
+    shuffle::Bool
+    seed::Int
+    sampling_version::String
     model_collection_fingerprint::Union{Nothing,String}
-    relation_fingerprint::Union{Nothing,String}
     sequence_fingerprint::String
     background_fingerprint::String
     contract::ProfileComparisonContract
@@ -72,18 +76,27 @@ function NullDistribution(
     raw_scores::Vector{Float64},
     pairs::Vector{NullPair},
     n_null::Int,
-    n_queries::Int,
-    skipped,
+    n_models::Int,
+    model_type::String,
+    shuffle::Bool,
+    seed::Int,
+    sampling_version::String,
     model_collection_fingerprint,
-    relation_fingerprint,
     sequence_fingerprint::String,
     background_fingerprint::String,
 )
     n_null >= 0 || throw(InvariantError("null distribution n_null must be non-negative."))
-    n_null == length(raw_scores) || throw(
-        InvariantError("null distribution n_null does not match raw_scores length."),
-    )
-    n_queries >= 0 || throw(InvariantError("null distribution n_queries must be non-negative."))
+    n_null == length(raw_scores) ||
+        throw(InvariantError("null distribution n_null does not match raw_scores length."))
+    n_models >= 2 ||
+        throw(InvariantError("null distribution requires at least two source models."))
+    length(pairs) == n_null ||
+        throw(InvariantError("null distribution pairs do not match n_null."))
+    isempty(model_type) &&
+        throw(InvariantError("null distribution model_type must not be empty."))
+    seed >= 0 || throw(InvariantError("null distribution seed must be non-negative."))
+    isempty(sampling_version) &&
+        throw(InvariantError("null distribution sampling_version must not be empty."))
     contract = ProfileComparisonContract(
         metric,
         10,
@@ -103,10 +116,12 @@ function NullDistribution(
         raw_scores,
         pairs,
         n_null,
-        n_queries,
-        skipped,
+        n_models,
+        model_type,
+        shuffle,
+        seed,
+        sampling_version,
         model_collection_fingerprint,
-        relation_fingerprint,
         sequence_fingerprint,
         background_fingerprint,
         contract,
@@ -120,25 +135,30 @@ Configuration for building a null distribution.
 
 Fields:
 - `metric`: comparison metric (Symbol, String, or typed metric).
-- `min_null_targets::Int`: minimum eligible targets required per query.
-- `strict::Bool`: if `true`, raise an error when a query has too few targets.
+- `n_samples::Int`: number of random pair comparisons.
+- `shuffle::Bool`: whether PWM models are shuffled before each comparison.
+- `seed::Int`: random seed for pair selection and PWM shuffling.
 """
 struct NullBuildConfig{M<:AbstractProfileMetric}
     metric::M
-    min_null_targets::Int
-    strict::Bool
+    n_samples::Int
+    shuffle::Bool
+    seed::Int
 
     function NullBuildConfig(
-        metric::M, min_null_targets::Int, strict::Bool
+        metric::M, n_samples::Int, shuffle::Bool, seed::Int
     ) where {M<:AbstractProfileMetric}
-        min_null_targets > 0 || throw(ArgumentError("min_null_targets must be positive."))
-        return new{M}(metric, min_null_targets, strict)
+        n_samples > 0 || throw(ArgumentError("n_samples must be positive."))
+        seed >= 0 || throw(ArgumentError("seed must be non-negative."))
+        return new{M}(metric, n_samples, shuffle, seed)
     end
 end
 
-function NullBuildConfig(; metric=nothing, min_null_targets::Int=1, strict::Bool=false)
+function NullBuildConfig(;
+    metric=nothing, n_samples::Int=2000, shuffle::Bool=false, seed::Int=127
+)
     resolved_metric = _resolve_profile_metric(isnothing(metric) ? :co : metric)
-    return NullBuildConfig(resolved_metric, min_null_targets, strict)
+    return NullBuildConfig(resolved_metric, n_samples, shuffle, seed)
 end
 
 """
@@ -153,24 +173,24 @@ struct NullBuildResult
 end
 
 """
-    build_null(models, relations; sequences=batch, metric=:co, min_null_targets=1,
-               strict=false, execution=SerialExecution(), kwargs...)
+    build_null(models; sequences=batch, metric=:co, n_samples=2000,
+               shuffle=false, seed=127, execution=SerialExecution())
 
-Build a pooled null distribution from all eligible query-target comparisons.
+Build a null distribution from randomly sampled query-target comparisons.
 
-For each model (query), compares it against all eligible targets (motifs from
-a different group) and collects raw scores. The pooled scores are fitted to a
-GEV distribution.
+Each sample selects two distinct models uniformly, optionally shuffles both
+models when they are PWMs, and collects their comparison score. Sampling is
+with replacement between iterations. The pooled scores are fitted to a GEV
+distribution.
 
 # Arguments
 - `models::AbstractVector`: vector of motif models (e.g. `PWM`).
-- `relations::GroupRelations`: group relations from [`parse_group_relations`](@ref).
 - `metric`: comparison metric.
-- `min_null_targets`: minimum eligible targets per query (default 1).
-- `strict`: if `true`, raise an error when a query has too few targets.
+- `n_samples`: number of random comparisons (default 2000).
+- `shuffle`: shuffle PWM columns and A/C/G/T weights within each column.
+- `seed`: random seed for reproducible sampling and shuffling.
 - `execution`: [`ExecutionPolicy`](@ref) for parallel comparison of query-target
   pairs. Default `SerialExecution()`.
-- `kwargs...`: additional keyword arguments passed to `compare`.
 
 Returns a [`NullBuildResult`](@ref).
 
@@ -180,11 +200,11 @@ the original comparison order, so the pooled score order and fit are
 identical to `SerialExecution`.
 """
 function build_null(
-    models::AbstractVector,
-    relations::GroupRelations;
+    models::AbstractVector;
     metric=nothing,
-    min_null_targets::Int=1,
-    strict::Bool=false,
+    n_samples::Int=2000,
+    shuffle::Bool=false,
+    seed::Int=127,
     execution::ExecutionPolicy=SerialExecution(),
     sequences::EncodedSequenceBatch,
     background::Union{Nothing,EncodedSequenceBatch}=nothing,
@@ -192,14 +212,12 @@ function build_null(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Real=0.0,
-    kwargs...,
 )
     config = NullBuildConfig(;
-        metric=metric, min_null_targets=min_null_targets, strict=strict
+        metric=metric, n_samples=n_samples, shuffle=shuffle, seed=seed
     )
     return build_null(
         models,
-        relations,
         config;
         execution=execution,
         sequences=sequences,
@@ -208,13 +226,11 @@ function build_null(
         window_radius=window_radius,
         realign_window=realign_window,
         min_logfpr=min_logfpr,
-        kwargs...,
     )
 end
 
 function build_null(
     models::AbstractVector,
-    relations::GroupRelations,
     config::NullBuildConfig{<:AbstractProfileMetric};
     execution::ExecutionPolicy=SerialExecution(),
     sequences::EncodedSequenceBatch,
@@ -223,173 +239,156 @@ function build_null(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Real=0.0,
-    kwargs...,
 )
-    isempty(kwargs) || throw(ArgumentError("unsupported profile null-build option."))
+    length(models) >= 2 ||
+        throw(ArgumentError("at least two models are required for null construction."))
+    all(model -> model isa AbstractMotifModel, models) ||
+        throw(ArgumentError("models must contain only AbstractMotifModel values."))
     for model in models
-        model isa AbstractMotifModel && validate_model(model; capability=:cache)
+        validate_model(model; capability=:cache)
     end
     names = String[modelname(model) for model in models]
     length(unique(names)) == length(names) ||
         throw(ArgumentError("model names must be unique for null construction."))
     all(!isempty, names) || throw(ArgumentError("model names must not be empty."))
+    model_types = unique(_null_model_type(model) for model in models)
+    length(model_types) == 1 ||
+        throw(ArgumentError("all models must belong to the same model family."))
     search_range >= 0 || throw(ArgumentError("search_range must be non-negative."))
     window_radius >= 0 || throw(ArgumentError("window_radius must be non-negative."))
     realign_window >= 0 || throw(ArgumentError("realign_window must be non-negative."))
     isfinite(min_logfpr) || throw(ArgumentError("min_logfpr must be finite."))
-    prepared = Vector{PreparedProfile}(undef, length(models))
-    _parallel_for(execution, length(models)) do i
-        model = models[i]
-        return prepared[i] = if model isa ScoreProfile
-            prepare_profile(model; min_logfpr=min_logfpr)
-        else
+    prepared = Vector{Union{Nothing,PreparedProfile}}(undef, length(models))
+    fill!(prepared, nothing)
+    reusable = findall(model -> !config.shuffle || !(model isa PWM), models)
+    _parallel_for(execution, length(reusable)) do i
+        model_index = reusable[i]
+        prepared[model_index] = prepare_profile(
+            models[model_index],
+            sequences;
+            background=background,
+            min_logfpr=min_logfpr,
+            execution=SerialExecution(),
+        )
+        return nothing
+    end
+
+    work_items = _null_work_items(length(models), config)
+    raw_scores = Vector{Float64}(undef, config.n_samples)
+    pairs = Vector{NullPair}(undef, config.n_samples)
+    _parallel_for(execution, config.n_samples) do i
+        item = work_items[i]
+        query = models[item.query]
+        target = models[item.target]
+        query_profile = if isnothing(prepared[item.query])
             prepare_profile(
-                model,
+                _shuffle_null_model(query, item.query_seed),
                 sequences;
                 background=background,
                 min_logfpr=min_logfpr,
                 execution=SerialExecution(),
             )
+        else
+            prepared[item.query]::PreparedProfile
         end
-    end
-    prepared_by_name = Dict(modelname(p) => p for p in prepared)
-    result = _build_null(models, relations, config, execution) do q, t
-        return compare(
-            prepared_by_name[modelname(q)],
-            prepared_by_name[modelname(t)];
+        target_profile = if isnothing(prepared[item.target])
+            prepare_profile(
+                _shuffle_null_model(target, item.target_seed),
+                sequences;
+                background=background,
+                min_logfpr=min_logfpr,
+                execution=SerialExecution(),
+            )
+        else
+            prepared[item.target]::PreparedProfile
+        end
+        result = compare(
+            query_profile,
+            target_profile;
             metric=config.metric,
             search_range=search_range,
             window_radius=window_radius,
             realign_window=realign_window,
         )
+        score = Float64(result.score)
+        raw_scores[i] = score
+        return pairs[i] = NullPair(
+            String(modelname(query)), String(modelname(target)), score
+        )
     end
-    dist = result.distribution
-    profiled_dist = NullDistribution(
-        dist.strategy,
-        dist.metric,
-        dist.fit,
-        dist.raw_scores,
-        dist.pairs,
-        dist.n_null,
-        dist.n_queries,
-        dist.skipped,
-        dist.model_collection_fingerprint,
-        dist.relation_fingerprint,
-        sequence_fingerprint(sequences),
-        isnothing(background) ? "none" : sequence_fingerprint(background),
+
+    fit_result = fit_gev(raw_scores)
+    seq_fingerprint = sequence_fingerprint(sequences)
+    bg_fingerprint = isnothing(background) ? "none" : sequence_fingerprint(background)
+    metric = metric_name(config.metric)
+    dist = NullDistribution(
+        "profile",
+        metric,
+        fit_result,
+        raw_scores,
+        pairs,
+        length(raw_scores),
+        length(models),
+        only(model_types),
+        config.shuffle,
+        config.seed,
+        "random-ordered-pairs-v1",
+        model_collection_fingerprint(AbstractProfileSource[models...]),
+        seq_fingerprint,
+        bg_fingerprint,
         ProfileComparisonContract(
-            dist.metric,
+            metric,
             search_range,
             window_radius,
             realign_window,
             Float32(min_logfpr),
             "empirical-log-tail-v1",
             "profile-alignment-v1",
-            sequence_fingerprint(sequences),
-            isnothing(background) ? "none" : sequence_fingerprint(background),
-            content_fingerprint(dist.raw_scores),
+            seq_fingerprint,
+            bg_fingerprint,
+            content_fingerprint(raw_scores),
         ),
     )
-    return NullBuildResult(profiled_dist, result.total_comparisons)
+    return NullBuildResult(dist, config.n_samples)
 end
 
-function _build_null(
-    compare_pair,
-    models::AbstractVector,
-    relations::GroupRelations,
-    config::NullBuildConfig,
-    execution::ExecutionPolicy,
-)
-    all(source -> source isa AbstractProfileSource, models) ||
-        throw(ArgumentError("models must contain only AbstractProfileSource values."))
-    by_name = Dict{String,AbstractProfileSource}()
-    for model in models
-        by_name[modelname(model)] = model
+struct _NullWorkItem
+    query::Int
+    target::Int
+    query_seed::UInt64
+    target_seed::UInt64
+end
+
+function _null_work_items(n_models::Int, config::NullBuildConfig)
+    rng = Random.MersenneTwister(config.seed)
+    items = Vector{_NullWorkItem}(undef, config.n_samples)
+    for i in eachindex(items)
+        query = rand(rng, 1:n_models)
+        target = rand(rng, 1:(n_models - 1))
+        target >= query && (target += 1)
+        items[i] = _NullWorkItem(query, target, rand(rng, UInt64), rand(rng, UInt64))
     end
+    return items
+end
 
-    # Build the work schedule: list of (query, target) pairs to compare.
-    #
-    # Type note: work_pairs uses AbstractProfileSource values because the
-    # collection may mix motif models and precomputed profiles.
-    # This abstract element type is unavoidable without requiring homogeneous
-    # model collections or a separate build_null method per concrete model type.
-    # The inner comparison loop dispatches through the compare_pair closure,
-    # which is type-stable per individual call. This is NOT a hot path — the
-    # expensive work is inside compare_pair, not in the work_pairs iteration.
-    # See PLAN_2.md E3 for the type/allocation audit rationale.
-    work_pairs = Tuple{AbstractProfileSource,AbstractProfileSource}[]
-    skipped = NamedTuple{(:query, :reason),Tuple{String,String}}[]
-    n_queries = 0
+_null_model_type(model::AbstractMotifModel) = lowercase(String(nameof(typeof(model))))
 
-    for query in models
-        qname = modelname(query)
-        target_names = eligible_targets(relations, qname)
-        # Filter to known models and exclude self
-        target_names = filter(n -> n != qname && haskey(by_name, n), target_names)
+_shuffle_null_model(model::AbstractMotifModel, ::UInt64) = model
 
-        if length(target_names) < config.min_null_targets
-            reason = "only $(length(target_names)) null target(s); required $(config.min_null_targets)"
-            push!(skipped, (query=qname, reason=reason))
-            if config.strict
-                throw(ArgumentError("Skipping null contribution for $qname: $reason"))
-            end
-            continue
-        end
-
-        n_queries += 1
-        for target_name in target_names
-            push!(work_pairs, (query, by_name[target_name]))
-        end
-    end
-
-    total_comparisons = length(work_pairs)
-    if total_comparisons == 0
-        throw(
-            ArgumentError(
-                "Cannot build a null distribution: no eligible query-target comparisons were found.",
-            ),
+function _shuffle_null_model(model::PWM, seed::UInt64)
+    rng = Random.MersenneTwister(seed)
+    column_order = randperm(rng, motif_length(model))
+    representation = copy(model.representation[:, column_order])
+    for column in axes(representation, 2)
+        base_order = randperm(rng, NUCLEOTIDE_CARDINALITY)
+        representation[1:NUCLEOTIDE_CARDINALITY, column] = representation[
+            base_order, column
+        ]
+        representation[5, column] = minimum(
+            @view representation[1:NUCLEOTIDE_CARDINALITY, column]
         )
     end
-
-    # Pre-allocate result slots for raw scores
-    raw_scores = Vector{Float64}(undef, total_comparisons)
-    pairs = Vector{NullPair}(undef, total_comparisons)
-
-    # Compare all pairs (serial or threaded)
-    _parallel_for(execution, total_comparisons) do i
-        q, t = work_pairs[i]
-        result = compare_pair(q, t)
-        score = Float64(result.score)
-        raw_scores[i] = score
-        return pairs[i] = NullPair(String(modelname(q)), String(modelname(t)), score)
-    end
-
-    fit_result = fit_gev(raw_scores)
-
-    dist = NullDistribution(
-        "profile",
-        metric_name(config.metric),
-        fit_result,
-        raw_scores,
-        pairs,
-        length(raw_scores),
-        n_queries,
-        skipped,
-        model_collection_fingerprint(AbstractProfileSource[models...]),
-        _relation_fingerprint(relations),
-        "none",
-        "none",
-    )
-
-    return NullBuildResult(dist, total_comparisons)
-end
-
-function _relation_fingerprint(relations::GroupRelations)
-    entries = String[]
-    for name in sort!(collect(keys(relations.groups)))
-        push!(entries, "$(name)=$(relations.groups[name])")
-    end
-    return content_fingerprint(join(entries, "\n"))
+    return PWM(model.name, representation, model.background)
 end
 
 # ---------------------------------------------------------------------------
@@ -528,6 +527,11 @@ function _null_id(dist::NullDistribution)
         "strategy=$(dist.strategy)",
         "metric=$(dist.metric)",
         "n_null=$(dist.n_null)",
+        "n_models=$(dist.n_models)",
+        "model_type=$(dist.model_type)",
+        "shuffle=$(dist.shuffle)",
+        "seed=$(dist.seed)",
+        "sampling=$(dist.sampling_version)",
         "raw=$(dist.contract.raw_scores_fingerprint)",
         "seq=$(dist.contract.sequence_fingerprint)",
         "bg=$(dist.contract.background_fingerprint)",
@@ -538,9 +542,6 @@ function _null_id(dist::NullDistribution)
     ]
     if dist.model_collection_fingerprint !== nothing
         push!(parts, "mcf=$(dist.model_collection_fingerprint)")
-    end
-    if dist.relation_fingerprint !== nothing
-        push!(parts, "rf=$(dist.relation_fingerprint)")
     end
     dist.fit isa GEVFit && append!(
         parts,
