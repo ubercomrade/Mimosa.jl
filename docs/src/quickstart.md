@@ -119,12 +119,26 @@ Threading is opt-in in both the runtime and the API:
 JULIA_NUM_THREADS=4 julia --project=.
 ```
 
+Mimosa keeps all comparison work in that single Julia process. For a scalar
+motif comparison, thread sequence scanning explicitly:
+
+```julia
+comparison = compare(
+    query, target, sequences;
+    scan_execution=ThreadedExecution(4),
+)
+```
+
+For `build_null` and one-to-many comparisons, use `outer_execution=ThreadedExecution(4)`
+and leave `scan_execution` serial. The two levels may not both use multiple
+threads.
+
 ```julia
 scores = scan(
     model,
     sequences;
     strands=BestStrand(),
-    execution=ThreadedExecution(4),
+    outer_execution=ThreadedExecution(4),
 )
 ```
 

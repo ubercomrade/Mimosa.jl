@@ -16,7 +16,7 @@ scores = scan(model, batch; strands=BestStrand(), execution=SerialExecution())
 result = compare(query, target, batch; metric=:co)
 
 prepared = prepare_profile(score_profile)
-results = compare(prepared, targets; execution=ThreadedExecution(4))
+results = compare(prepared, targets; outer_execution=ThreadedExecution(4))
 
 sites = selectsites(model, batch, selector; execution=SerialExecution())
 pfm = reconstruct_pfm(model, batch, selector; execution=SerialExecution())

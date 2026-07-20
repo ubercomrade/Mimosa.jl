@@ -84,6 +84,30 @@ end
     @test repeated.distribution.raw_scores == dist.raw_scores
     @test repeated.distribution.pairs == dist.pairs
 
+    scan_threaded = build_null(
+        models;
+        sequences=sequences,
+        metric=:co,
+        n_samples=12,
+        shuffle=true,
+        seed=9,
+        scan_execution=ThreadedExecution(2),
+    )
+    @test scan_threaded.distribution.raw_scores == dist.raw_scores
+    @test scan_threaded.distribution.pairs == dist.pairs
+    if Threads.nthreads() > 1
+        @test_throws ArgumentError build_null(
+            models;
+            sequences=sequences,
+            n_samples=2,
+            outer_execution=ThreadedExecution(2),
+            scan_execution=ThreadedExecution(2),
+        )
+    end
+    @test_throws MethodError build_null(
+        models; sequences=sequences, n_samples=2, execution=SerialExecution()
+    )
+
     @test_throws ArgumentError build_null(models[1:1]; sequences=sequences, n_samples=2)
     duplicate = [models[1], PWM("m1", models[2].representation, _NULL_BG)]
     @test_throws ArgumentError build_null(duplicate; sequences=sequences, n_samples=2)

@@ -174,7 +174,8 @@ end
 
 """
     build_null(models; sequences=batch, metric=:co, n_samples=2000,
-               shuffle=false, seed=127, execution=SerialExecution())
+               shuffle=false, seed=127, outer_execution=SerialExecution(),
+               scan_execution=SerialExecution())
 
 Build a null distribution from randomly sampled query-target comparisons.
 
@@ -189,8 +190,10 @@ distribution.
 - `n_samples`: number of random comparisons (default 2000).
 - `shuffle`: shuffle PWM columns and A/C/G/T weights within each column.
 - `seed`: random seed for reproducible sampling and shuffling.
-- `execution`: [`ExecutionPolicy`](@ref) for parallel comparison of query-target
+- `outer_execution`: [`ExecutionPolicy`](@ref) for parallel comparison of query-target
   pairs. Default `SerialExecution()`.
+- `scan_execution`: policy for scanning sequences and applying normalization
+  within one pair. It must not be multi-threaded together with `outer_execution`.
 
 Returns a [`NullBuildResult`](@ref).
 
@@ -205,7 +208,8 @@ function build_null(
     n_samples::Int=2000,
     shuffle::Bool=false,
     seed::Int=127,
-    execution::ExecutionPolicy=SerialExecution(),
+    outer_execution::ExecutionPolicy=SerialExecution(),
+    scan_execution::ExecutionPolicy=SerialExecution(),
     sequences::EncodedSequenceBatch,
     background::Union{Nothing,EncodedSequenceBatch}=nothing,
     search_range::Int=10,
@@ -219,7 +223,8 @@ function build_null(
     return build_null(
         models,
         config;
-        execution=execution,
+        outer_execution=outer_execution,
+        scan_execution=scan_execution,
         sequences=sequences,
         background=background,
         search_range=search_range,
@@ -232,7 +237,8 @@ end
 function build_null(
     models::AbstractVector,
     config::NullBuildConfig{<:AbstractProfileMetric};
-    execution::ExecutionPolicy=SerialExecution(),
+    outer_execution::ExecutionPolicy=SerialExecution(),
+    scan_execution::ExecutionPolicy=SerialExecution(),
     sequences::EncodedSequenceBatch,
     background::Union{Nothing,EncodedSequenceBatch}=nothing,
     search_range::Int=10,
@@ -240,6 +246,7 @@ function build_null(
     realign_window::Int=3,
     min_logfpr::Real=0.0,
 )
+    _validate_execution_levels(outer_execution, scan_execution)
     length(models) >= 2 ||
         throw(ArgumentError("at least two models are required for null construction."))
     all(model -> model isa AbstractMotifModel, models) ||
@@ -261,14 +268,14 @@ function build_null(
     prepared = Vector{Union{Nothing,PreparedProfile}}(undef, length(models))
     fill!(prepared, nothing)
     reusable = findall(model -> !config.shuffle || !(model isa PWM), models)
-    _parallel_for(execution, length(reusable)) do i
+    _parallel_for(outer_execution, length(reusable)) do i
         model_index = reusable[i]
         prepared[model_index] = prepare_profile(
             models[model_index],
             sequences;
             background=background,
             min_logfpr=min_logfpr,
-            execution=SerialExecution(),
+            scan_execution=scan_execution,
         )
         return nothing
     end
@@ -276,7 +283,7 @@ function build_null(
     work_items = _null_work_items(length(models), config)
     raw_scores = Vector{Float64}(undef, config.n_samples)
     pairs = Vector{NullPair}(undef, config.n_samples)
-    _parallel_for(execution, config.n_samples) do i
+    _parallel_for(outer_execution, config.n_samples) do i
         item = work_items[i]
         query = models[item.query]
         target = models[item.target]
@@ -286,7 +293,7 @@ function build_null(
                 sequences;
                 background=background,
                 min_logfpr=min_logfpr,
-                execution=SerialExecution(),
+                scan_execution=scan_execution,
             )
         else
             prepared[item.query]::PreparedProfile
@@ -297,7 +304,7 @@ function build_null(
                 sequences;
                 background=background,
                 min_logfpr=min_logfpr,
-                execution=SerialExecution(),
+                scan_execution=scan_execution,
             )
         else
             prepared[item.target]::PreparedProfile

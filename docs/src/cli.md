@@ -78,7 +78,7 @@ The input must be a directory containing at least two models of the selected
 type. Each iteration samples two distinct ordered models. `--shuffle` permutes
 PWM columns and independently permutes A/C/G/T weights inside every column;
 for other model types it currently has no effect. The output is always a
-version-5 profile null bundle. `--jobs` is a deprecated alias for `--threads`.
+version-5 profile null bundle.
 
 ### `cache clear`
 
@@ -92,6 +92,10 @@ julia -m Mimosa \
 `--threads=N` selects `ThreadedExecution(N)` but cannot create Julia runtime
 threads. Start Julia with `--threads=N` or `JULIA_NUM_THREADS=N`. The CLI rejects
 a request larger than `Threads.nthreads()`.
+
+Mimosa uses one Julia process and shared memory. For `build-null`, `--threads`
+parallelizes null pairs; do not combine it with multiple external Julia
+processes. `--threads` is the only CLI control for Mimosa's execution policy.
 
 ## Process Contract
 

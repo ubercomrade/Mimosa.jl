@@ -331,12 +331,11 @@ end
     @test code == 1
 end
 
-@testset "CLI build-null: threads alias works" begin
+@testset "CLI build-null: threads works" begin
     dir = mktempdir()
     coll_dir = _copy_motif_collection(dir, EXAMPLES)
     output_path = joinpath(dir, "null_threaded")
 
-    # --jobs alias should work same as --threads
     code = Mimosa.main([
         "build-null",
         coll_dir,
@@ -348,7 +347,7 @@ end
         "8",
         "--output",
         output_path,
-        "--jobs",
+        "--threads",
         "1",
     ])
     @test code == 0
@@ -391,7 +390,7 @@ end
         n_samples=12,
         shuffle=true,
         seed=19,
-        execution=SerialExecution(),
+        outer_execution=SerialExecution(),
     )
     serial_scores = serial_result.distribution.raw_scores
 
@@ -402,7 +401,7 @@ end
             n_samples=12,
             shuffle=true,
             seed=19,
-            execution=ThreadedExecution(nt),
+            outer_execution=ThreadedExecution(nt),
         )
         threaded_scores = threaded_result.distribution.raw_scores
         @test threaded_scores == serial_scores

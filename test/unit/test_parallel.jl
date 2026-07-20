@@ -24,10 +24,6 @@ end
         @test policy == ThreadedExecution(Threads.nthreads())
     end
 
-    jobs_parsed = Mimosa.CLIParsed("build-null")
-    jobs_parsed.options["jobs"] = string(Threads.nthreads())
-    @test Mimosa._execution_policy(jobs_parsed) == policy
-
     parsed.options["threads"] = string(Threads.nthreads() + 1)
     @test_throws Mimosa.CLIError Mimosa._execution_policy(parsed)
 end

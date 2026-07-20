@@ -89,6 +89,17 @@ function _effective_ntasks(pol::ThreadedExecution, n::Int)
     return min(pol.ntasks, n, max(1, Threads.nthreads()))
 end
 
+_is_effectively_threaded(::SerialExecution) = false
+_is_effectively_threaded(pol::ThreadedExecution) = min(pol.ntasks, Threads.nthreads()) > 1
+
+function _validate_execution_levels(
+    outer_execution::ExecutionPolicy, scan_execution::ExecutionPolicy
+)
+    _is_effectively_threaded(outer_execution) && _is_effectively_threaded(scan_execution) &&
+        throw(ArgumentError("outer_execution and scan_execution cannot both use multiple threads."))
+    return nothing
+end
+
 function _in_parallel_region()
     return get(task_local_storage(), _PARALLEL_DEPTH_KEY, 0) > 0
 end

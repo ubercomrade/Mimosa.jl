@@ -23,41 +23,29 @@ the lookup table. Matches Python's `build_score_log_tail_table`.
 """
 struct EmpiricalLogTail end
 
-function _fit_empirical!(
-    scores::AbstractVector{Float32},
-    normalized::Union{Nothing,AbstractVector{Float32}}=nothing,
-)
-    n = length(scores)
+function _fit_empirical_table!(workspace::Vector{Float32})
+    n = length(workspace)
     n == 0 && return LogTailTable(Float32[0.0f0], Float32[0.0f0])
 
-    perm = sortperm(scores; rev=true)
-    n_unique = 1
-    @inbounds for k in 2:n
-        n_unique += scores[perm[k]] != scores[perm[k - 1]]
-    end
-
-    unique_scores = Vector{Float32}(undef, n_unique)
-    log_tail = Vector{Float32}(undef, n_unique)
-    group = 1
+    sort!(workspace; rev=true)
+    log_tail = Vector{Float32}(undef, n)
+    n_unique = 0
     k = 1
     @inbounds while k <= n
-        score = scores[perm[k]]
-        unique_scores[group] = score
+        score = workspace[k]
+        n_unique += 1
+        workspace[n_unique] = score
         j = k + 1
-        while j <= n && scores[perm[j]] == score
+        while j <= n && workspace[j] == score
             j += 1
         end
         value = Float32(-log10(Float64(j - 1) / Float64(n)))
-        log_tail[group] = value
-        if normalized !== nothing
-            for p in k:(j - 1)
-                normalized[perm[p]] = value
-            end
-        end
-        group += 1
+        log_tail[n_unique] = value
         k = j
     end
-    return LogTailTable(unique_scores, log_tail)
+    resize!(workspace, n_unique)
+    resize!(log_tail, n_unique)
+    return LogTailTable(workspace, log_tail)
 end
 
 """
@@ -72,40 +60,34 @@ Algorithm (matching Python's `build_score_log_tail_table`):
 4. Transform to `-log10(tail_probability)`.
 """
 function fit(::EmpiricalLogTail, scores::AbstractVector{T}) where {T<:Real}
-    return _fit_empirical!(Float32[float(score) for score in scores])
+    return _fit_empirical_table!(Float32.(scores))
 end
 
-function _fit_transform_empirical(scores::RaggedArray{Float32})
-    normalized = similar(scores.data)
-    table = _fit_empirical!(scores.data, normalized)
-    return table, RaggedArray(normalized, copy(scores.offsets))
+function _empirical_workspace(bundle::StrandPair{<:RaggedArray{Float32}})
+    fwd = bundle.forward.data
+    rev = bundle.reverse.data
+    n_fwd = length(fwd)
+    n_rev = bundle.forward === bundle.reverse ? 0 : length(rev)
+    total = Base.checked_add(n_fwd, n_rev)
+    workspace = Vector{Float32}(undef, total)
+    copyto!(workspace, 1, fwd, 1, n_fwd)
+    n_rev > 0 && copyto!(workspace, n_fwd + 1, rev, 1, n_rev)
+    return workspace
 end
 
 """
-    _fit_transform_empirical(bundle::StrandPair)
+    _fit_normalize_empirical(raw; calibration=raw, scan_execution=SerialExecution())
 
-Fit one empirical table from both strands and scatter normalized values while
-walking the single descending permutation. This is the common case where the
-calibration bundle and the output bundle are the same raw scan.
+Canonical empirical-normalization pipeline. It fits a table only from
+`calibration` and applies that table to `raw`.
 """
-function _fit_transform_empirical(bundle::StrandPair{<:RaggedArray{Float32}})
-    if bundle.forward === bundle.reverse
-        table, normalized = _fit_transform_empirical(bundle.forward)
-        return table, StrandPair(normalized, normalized)
-    end
-
-    n_forward = length(bundle.forward.data)
-    n_reverse = length(bundle.reverse.data)
-    flat = [bundle.forward.data; bundle.reverse.data]
-    normalized = similar(flat)
-    table = _fit_empirical!(flat, normalized)
-
-    forward = RaggedArray(@view(normalized[1:n_forward]), copy(bundle.forward.offsets))
-    reverse = RaggedArray(
-        @view(normalized[(n_forward + 1):(n_forward + n_reverse)]),
-        copy(bundle.reverse.offsets),
-    )
-    return table, StrandPair(forward, reverse)
+function _fit_normalize_empirical(
+    raw::StrandPair{<:RaggedArray{Float32}};
+    calibration::StrandPair{<:RaggedArray{Float32}}=raw,
+    scan_execution::ExecutionPolicy=SerialExecution(),
+)
+    table = _fit_empirical_table!(_empirical_workspace(calibration))
+    return table, normalize_bundle(table, raw; scan_execution=scan_execution)
 end
 
 """
@@ -156,12 +138,21 @@ end
 Apply the log-tail lookup to every element of a [`RaggedArray`](@ref),
 returning a new `RaggedArray{Float32}` with mapped values.
 """
-function transform_scores(table::LogTailTable, scores::RaggedArray{Float32})
+function transform_scores(
+    table::LogTailTable,
+    scores::RaggedArray{Float32};
+    scan_execution::ExecutionPolicy=SerialExecution(),
+)
     n = length(scores.data)
     n == 0 && return RaggedArray(Float32[], copy(scores.offsets))
     out_data = Vector{Float32}(undef, n)
-    @inbounds for i in 1:n
-        out_data[i] = lookup_score(table, scores.data[i])
+    nchunks = scan_execution isa ThreadedExecution ? _effective_ntasks(scan_execution, n) : 1
+    _parallel_for(scan_execution, nchunks) do chunk
+        first = fld((chunk - 1) * n, nchunks) + 1
+        last = fld(chunk * n, nchunks)
+        @inbounds for i in first:last
+            out_data[i] = lookup_score(table, scores.data[i])
+        end
     end
     return RaggedArray(out_data, copy(scores.offsets))
 end
@@ -173,7 +164,12 @@ Flatten all valid scores from both strands into a single vector.
 Used to fit the normalization table from background scan scores.
 """
 function flatten_bundle(bundle::StrandPair{<:RaggedArray{Float32}})
-    return vcat(bundle.forward.data, bundle.reverse.data)
+    fwd = bundle.forward.data
+    rev = bundle.reverse.data
+    workspace = Vector{Float32}(undef, Base.checked_add(length(fwd), length(rev)))
+    copyto!(workspace, 1, fwd, 1, length(fwd))
+    copyto!(workspace, length(fwd) + 1, rev, 1, length(rev))
+    return workspace
 end
 
 """
@@ -181,9 +177,14 @@ end
 
 Apply the log-tail lookup to both strands of a profile bundle.
 """
-function normalize_bundle(table::LogTailTable, bundle::StrandPair{<:RaggedArray{Float32}})
-    fwd = transform_scores(table, bundle.forward)
-    rev = transform_scores(table, bundle.reverse)
+function normalize_bundle(
+    table::LogTailTable,
+    bundle::StrandPair{<:RaggedArray{Float32}};
+    scan_execution::ExecutionPolicy=SerialExecution(),
+)
+    fwd = transform_scores(table, bundle.forward; scan_execution=scan_execution)
+    bundle.forward === bundle.reverse && return StrandPair(fwd, fwd)
+    rev = transform_scores(table, bundle.reverse; scan_execution=scan_execution)
     return StrandPair(fwd, rev)
 end
 

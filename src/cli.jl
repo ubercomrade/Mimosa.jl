@@ -98,7 +98,7 @@ function _resolve_sequences(
 end
 
 function _execution_policy(parsed::CLIParsed)
-    threads_str = get(parsed.options, "threads", get(parsed.options, "jobs", "1"))
+    threads_str = get(parsed.options, "threads", "1")
     requested = tryparse(Int, threads_str)
     requested === nothing && throw(CLIError("--threads must be a positive integer."))
     requested > 0 || throw(CLIError("--threads must be a positive integer."))
@@ -393,7 +393,7 @@ function _run_profile(parsed::CLIParsed)
             realign_window=realign_window,
             min_logfpr=min_logfpr,
             background=bg_sequences,
-            execution=execution,
+            scan_execution=execution,
             cache=cache,
         )
     end
@@ -448,7 +448,6 @@ function _print_build_null_help(io::IO)
         io,
         "  --threads <n>             Worker threads to use (default: 1; runtime must provide them)",
     )
-    println(io, "  --jobs <n>                Deprecated alias for --threads")
     println(io, "  --quiet                   Suppress informational output")
     println(io, "  --verbose                 Verbose diagnostics to stderr")
     return nothing
@@ -561,7 +560,7 @@ function _run_build_null(parsed::CLIParsed)
         n_samples=n_samples,
         shuffle=shuffle,
         seed=seed,
-        execution=exec_policy,
+        outer_execution=exec_policy,
         sequences=sequences,
         search_range=search_range,
         window_radius=window_radius,
@@ -725,7 +724,6 @@ function _cli_settings()
         "--realign-window"
         "--min-logfpr"
         "--threads"
-        "--jobs"
         "--shuffle"
         action = :store_true
     end

@@ -96,6 +96,14 @@ scores = scan(
 
 Serial and threaded execution preserve result order and exact discrete fields.
 
+For profile comparisons and `build_null`, `outer_execution` is the outer level
+(targets or null pairs) and `scan_execution` controls scanning sequences within
+one profile. Choose one threaded level: using multi-threaded policies for both
+throws `ArgumentError`. For one scalar comparison use
+`scan_execution=ThreadedExecution(n)`; for many targets or null pairs use
+`outer_execution=ThreadedExecution(n)` with the default
+serial `scan_execution`.
+
 ## Compare motif models
 
 Comparison requires the same `EncodedSequenceBatch` for both models:
@@ -164,7 +172,7 @@ results = compare(
     [target, readmodel("examples/foxa2.meme")],
     sequences;
     metric=:cosine,
-    execution=ThreadedExecution(4),
+    outer_execution=ThreadedExecution(4),
     cache=cache,
 )
 ```

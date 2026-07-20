@@ -855,15 +855,15 @@ Keyword arguments:
 function prepare_profile(
     model::ScoreProfile;
     min_logfpr::Real=0.0,
-    execution::ExecutionPolicy=SerialExecution(),
+    scan_execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
     threshold = Float32(min_logfpr)
     isfinite(threshold) || throw(ArgumentError("min_logfpr must be finite."))
     key, cached = _cached_prepared_profile(cache, model, nothing, nothing, threshold)
     cached !== nothing && return cached
-    _, normalized = _fit_transform_empirical(model.scores)
-    norm_bundle = StrandPair(normalized, normalized)
+    raw = StrandPair(model.scores, model.scores)
+    _, norm_bundle = _fit_normalize_empirical(raw; scan_execution=scan_execution)
     anchors = _collect_both_anchors(norm_bundle, threshold)
     prepared = PreparedProfile(String(modelname(model)), norm_bundle, anchors, threshold)
     return _store_prepared_profile!(cache, key, prepared)
@@ -884,7 +884,7 @@ function prepare_profile(
     sequences::EncodedSequenceBatch;
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     min_logfpr::Real=0.0,
-    execution::ExecutionPolicy=SerialExecution(),
+    scan_execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
     threshold = Float32(min_logfpr)
@@ -892,18 +892,28 @@ function prepare_profile(
     validate_model(model; capability=:compare)
     key, cached = _cached_prepared_profile(cache, model, sequences, background, threshold)
     cached !== nothing && return cached
-    raw = _scan_model_batch(model, sequences; strands=BothStrands(), execution=execution)
+    raw = _scan_model_batch(model, sequences; strands=BothStrands(), execution=scan_execution)
     bg = background === nothing ? sequences : background
-    if bg === sequences
-        _, norm_bundle = _fit_transform_empirical(raw)
+    norm_bundle = if bg === sequences
+        last(_fit_normalize_empirical(raw; scan_execution=scan_execution))
     else
-        bg_raw = _scan_model_batch(model, bg; strands=BothStrands(), execution=execution)
-        table = fit(EmpiricalLogTail(), flatten_bundle(bg_raw))
-        norm_bundle = normalize_bundle(table, raw)
+        _normalize_against_background(model, raw, bg, scan_execution)
     end
     anchors = _collect_both_anchors(norm_bundle, threshold)
     prepared = PreparedProfile(String(modelname(model)), norm_bundle, anchors, threshold)
     return _store_prepared_profile!(cache, key, prepared)
+end
+
+# Keep the large background scan scoped to this helper so it can become dead
+# before foreground anchor collection.
+function _normalize_against_background(
+    model::AbstractMotifModel,
+    raw::StrandPair{<:RaggedArray{Float32}},
+    background::EncodedSequenceBatch,
+    scan_execution::ExecutionPolicy,
+)
+    bg_raw = _scan_model_batch(model, background; strands=BothStrands(), execution=scan_execution)
+    return last(_fit_normalize_empirical(raw; calibration=bg_raw, scan_execution=scan_execution))
 end
 
 # ── PreparedProfile compare methods ────────────────────────────────────────────
@@ -988,7 +998,7 @@ Each target is prepared (normalized, anchors collected) independently.
 function compare(
     query::PreparedProfile,
     targets::AbstractVector{<:ScoreProfile};
-    execution::ExecutionPolicy=SerialExecution(),
+    outer_execution::ExecutionPolicy=SerialExecution(),
     metric::Union{AbstractString,Symbol,AbstractProfileMetric}=:co,
     search_range::Int=10,
     window_radius::Int=10,
@@ -1005,7 +1015,7 @@ function compare(
     )
     results = Vector{ComparisonResult}(undef, length(targets))
     isempty(targets) && return results
-    _parallel_for(execution, length(targets)) do i
+    _parallel_for(outer_execution, length(targets)) do i
         target = targets[i]
         prepared_target = prepare_profile(target; min_logfpr=threshold, cache=cache)
         score, shift, orientation, n_sites, metric_str = profile_compare(
@@ -1027,7 +1037,7 @@ end
 function compare(
     query::PreparedProfile,
     targets::AbstractVector{<:PreparedProfile};
-    execution::ExecutionPolicy=SerialExecution(),
+    outer_execution::ExecutionPolicy=SerialExecution(),
     metric::Union{AbstractString,Symbol,AbstractProfileMetric}=:co,
     search_range::Int=10,
     window_radius::Int=10,
@@ -1042,7 +1052,7 @@ function compare(
     )
     results = Vector{ComparisonResult}(undef, length(targets))
     isempty(targets) && return results
-    _parallel_for(execution, length(targets)) do i
+    _parallel_for(outer_execution, length(targets)) do i
         target = targets[i]
         query.min_logfpr == target.min_logfpr ||
             throw(ArgumentError("prepared profiles use different min_logfpr thresholds."))
@@ -1065,7 +1075,7 @@ end
 """
     compare(query::PreparedProfile, target::AbstractMotifModel,
             sequences::EncodedSequenceBatch; metric=:co,
-            execution=SerialExecution(), kwargs...)
+            scan_execution=SerialExecution(), kwargs...)
 
 Compare a [`PreparedProfile`](@ref) against a motif model target by scanning
 the target against `sequences` and comparing profiles. The query's normalized
@@ -1081,7 +1091,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
-    execution::ExecutionPolicy=SerialExecution(),
+    scan_execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)
@@ -1092,7 +1102,7 @@ function compare(
         target, sequences;
         background=background,
         min_logfpr=threshold,
-        execution=execution,
+        scan_execution=scan_execution,
         cache=cache,
     )
     config = ProfileConfig(;
@@ -1113,7 +1123,7 @@ end
 """
     compare(query::AbstractMotifModel, target::PreparedProfile,
             sequences::EncodedSequenceBatch; metric=:co,
-            execution=SerialExecution(), kwargs...)
+            scan_execution=SerialExecution(), kwargs...)
 
 Compare a motif model query (scanned against `sequences`) against a
 [`PreparedProfile`](@ref) target. The target's normalized bundle and anchors
@@ -1129,7 +1139,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
-    execution::ExecutionPolicy=SerialExecution(),
+    scan_execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)
@@ -1140,7 +1150,7 @@ function compare(
         query, sequences;
         background=background,
         min_logfpr=threshold,
-        execution=execution,
+        scan_execution=scan_execution,
         cache=cache,
     )
     config = ProfileConfig(;
@@ -1159,7 +1169,7 @@ function compare(
 end
 
 """
-    compare(query::PreparedProfile, targets, sequences; execution=...)
+    compare(query::PreparedProfile, targets, sequences; outer_execution=...)
 
 Compare one prepared query against motif-model targets. Each target owns a
 serial scan, normalization, anchor collection, and alignment path.
@@ -1168,7 +1178,8 @@ function compare(
     query::PreparedProfile,
     targets::AbstractVector{<:AbstractMotifModel},
     sequences::EncodedSequenceBatch;
-    execution::ExecutionPolicy=SerialExecution(),
+    outer_execution::ExecutionPolicy=SerialExecution(),
+    scan_execution::ExecutionPolicy=SerialExecution(),
     metric::Union{AbstractString,Symbol,AbstractProfileMetric}=:co,
     search_range::Int=10,
     window_radius::Int=10,
@@ -1177,6 +1188,7 @@ function compare(
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     cache=nothing,
 )
+    _validate_execution_levels(outer_execution, scan_execution)
     threshold = min_logfpr === nothing ? query.min_logfpr : Float32(min_logfpr)
     threshold == query.min_logfpr ||
         throw(ArgumentError("min_logfpr differs from the prepared query threshold."))
@@ -1189,13 +1201,13 @@ function compare(
     )
     results = Vector{ComparisonResult}(undef, length(targets))
     isempty(targets) && return results
-    _parallel_for(execution, length(targets)) do i
+    _parallel_for(outer_execution, length(targets)) do i
         target = targets[i]
         prepared_target = prepare_profile(
             target, sequences;
             background=background,
             min_logfpr=threshold,
-            execution=SerialExecution(),
+            scan_execution=scan_execution,
             cache=cache,
         )
         score, shift, orientation, n_sites, metric_str = profile_compare(
@@ -1215,7 +1227,7 @@ function compare(
 end
 
 """
-    compare(query_model, targets, sequences; execution=...)
+    compare(query_model, targets, sequences; outer_execution=...)
 
 Prepare the query once, then compare it against motif-model targets at the
 outer target level. Inner target work is explicitly serial.
@@ -1224,7 +1236,8 @@ function compare(
     query::AbstractMotifModel,
     targets::AbstractVector{<:AbstractMotifModel},
     sequences::EncodedSequenceBatch;
-    execution::ExecutionPolicy=SerialExecution(),
+    outer_execution::ExecutionPolicy=SerialExecution(),
+    scan_execution::ExecutionPolicy=SerialExecution(),
     metric::Union{AbstractString,Symbol,AbstractProfileMetric}=:co,
     search_range::Int=10,
     window_radius::Int=10,
@@ -1233,12 +1246,16 @@ function compare(
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     cache=nothing,
 )
-    prepared_query = prepare_profile(query, sequences; background, min_logfpr, execution, cache)
+    _validate_execution_levels(outer_execution, scan_execution)
+    prepared_query = prepare_profile(
+        query, sequences; background, min_logfpr, scan_execution, cache
+    )
     return compare(
         prepared_query,
         targets,
         sequences;
-        execution,
+        outer_execution,
+        scan_execution,
         metric,
         search_range,
         window_radius,

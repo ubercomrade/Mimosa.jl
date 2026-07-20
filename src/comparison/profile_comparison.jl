@@ -77,36 +77,6 @@ function compare(
     return throw(ArgumentError("ScoreProfile comparison does not consume sequences."))
 end
 
-# ── Motif-derived profile comparison ──────────────────────────────────────────
-
-"""
-    _resolve_profile_bundle(model, sequences, background_sequences; kwargs...)
-
-Scan a motif model against `sequences` to produce a raw strand-aware profile
-bundle, then fit and apply `EmpiricalLogTail` normalization from
-`background_sequences` (falls back to `sequences` when `background_sequences`
-is `nothing`).
-
-Returns `StrandPair{RaggedArray{Float32}}` with normalized scores.
-"""
-function _resolve_profile_bundle(
-    model::AbstractMotifModel,
-    sequences::EncodedSequenceBatch,
-    background_sequences::Union{EncodedSequenceBatch,Nothing};
-    execution::ExecutionPolicy=SerialExecution(),
-)
-    validate_model(model; capability=:compare)
-    raw = _scan_model_batch(model, sequences; strands=BothStrands(), execution=execution)
-    bg = background_sequences === nothing ? sequences : background_sequences
-    if bg === sequences
-        _, normalized = _fit_transform_empirical(raw)
-        return normalized
-    end
-    bg_raw = _scan_model_batch(model, bg; strands=BothStrands(), execution=execution)
-    table = fit(EmpiricalLogTail(), flatten_bundle(bg_raw))
-    return normalize_bundle(table, raw)
-end
-
 """
     compare(query::AbstractMotifModel, target::AbstractMotifModel,
             sequences::EncodedSequenceBatch; metric=:co, kwargs...)
@@ -135,7 +105,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Real=0.0,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
-    execution::ExecutionPolicy=SerialExecution(),
+    scan_execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)
@@ -144,14 +114,14 @@ function compare(
         query, sequences;
         background=background,
         min_logfpr=threshold,
-        execution=execution,
+        scan_execution=scan_execution,
         cache=cache,
     )
     prepared_target = prepare_profile(
         target, sequences;
         background=background,
         min_logfpr=threshold,
-        execution=execution,
+        scan_execution=scan_execution,
         cache=cache,
     )
     config = ProfileConfig(;

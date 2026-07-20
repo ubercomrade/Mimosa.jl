@@ -27,6 +27,11 @@ end
     @test t.log_tail[1] ≈ Float32(-log10(1.0 / 6.0)) atol = 1e-5
     @test t.log_tail[2] ≈ Float32(-log10(3.0 / 6.0)) atol = 1e-5
     @test t.log_tail[3] ≈ Float32(-log10(6.0 / 6.0)) atol = 1e-5
+
+    input = Float32[3, 2, 2, 1, -0.0f0, 0.0f0]
+    original = copy(input)
+    @test fit(EmpiricalLogTail(), input).scores == Float32[3, 2, 1, 0]
+    @test input == original
 end
 
 @testset "LogTailTable lookup" begin
@@ -85,7 +90,7 @@ end
     reverse = build_ragged([Float32[0, 2, 3], Float32[1], Float32[]])
     bundle = StrandPair(forward, reverse)
 
-    fused_table, fused = Mimosa._fit_transform_empirical(bundle)
+    fused_table, fused = Mimosa._fit_normalize_empirical(bundle)
     reference_table = fit(EmpiricalLogTail(), flatten_bundle(bundle))
     reference = normalize_bundle(reference_table, bundle)
 
@@ -96,7 +101,7 @@ end
     @test fused.forward.data == reference.forward.data
     @test fused.reverse.data == reference.reverse.data
 
-    _, symmetric = Mimosa._fit_transform_empirical(StrandPair(forward, forward))
+    _, symmetric = Mimosa._fit_normalize_empirical(StrandPair(forward, forward))
     @test symmetric.forward === symmetric.reverse
 end
 
@@ -271,7 +276,7 @@ end
         search_range=2,
         window_radius=1,
         realign_window=1,
-        execution=SerialExecution(),
+        outer_execution=SerialExecution(),
     )
     prepared = compare(
         prepare_profile(query, batch),
@@ -281,7 +286,7 @@ end
         search_range=2,
         window_radius=1,
         realign_window=1,
-        execution=SerialExecution(),
+        outer_execution=SerialExecution(),
     )
     @test [r.target for r in serial] == ["target1", "target2"]
     @test prepared == serial
@@ -294,7 +299,29 @@ end
         search_range=2,
         window_radius=1,
         realign_window=1,
-        execution=ThreadedExecution(4),
+        outer_execution=ThreadedExecution(4),
     )
     @test threaded == serial
+
+    scan_threaded = compare(
+        query,
+        targets[1],
+        batch;
+        metric=:co,
+        search_range=2,
+        window_radius=1,
+        realign_window=1,
+        scan_execution=ThreadedExecution(2),
+    )
+    @test scan_threaded == serial[1]
+
+    if Threads.nthreads() > 1
+        @test_throws ArgumentError compare(
+            query,
+            targets,
+            batch;
+            outer_execution=ThreadedExecution(2),
+            scan_execution=ThreadedExecution(2),
+        )
+    end
 end
