@@ -93,9 +93,10 @@ julia -m Mimosa \
 threads. Start Julia with `--threads=N` or `JULIA_NUM_THREADS=N`. The CLI rejects
 a request larger than `Threads.nthreads()`.
 
-Mimosa uses one Julia process and shared memory. For `build-null`, `--threads`
-parallelizes null pairs; do not combine it with multiple external Julia
-processes. `--threads` is the only CLI control for Mimosa's execution policy.
+Mimosa uses one Julia process and shared memory. Targets and null pairs retain
+stable serial order; `--threads` parallelizes scanning, Hybrid normalization,
+anchor collection, and profile alignment within each comparison. It is the
+only CLI control for Mimosa's execution policy.
 
 ## Process Contract
 

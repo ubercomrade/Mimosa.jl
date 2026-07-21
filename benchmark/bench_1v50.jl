@@ -1,18 +1,15 @@
 #!/usr/bin/env julia
-# Benchmark two 1-vs-many execution strategies on random sequences:
+# Benchmark Hybrid serial/threaded scaling and the internal Exact reference:
 #
-#   1. Hybrid inner-threaded
+#   1. Hybrid serial and inner-threaded
 #      - HybridEmpiricalLogTail normalization;
-#      - targets are processed serially (outer_execution=SerialExecution());
-#      - scan and normalization work inside each target uses ThreadedExecution.
+#      - targets are processed serially;
+#      - computational kernels inside each target use ThreadedExecution.
 #
-#   2. Exact target-threaded
+#   2. Exact inner-threaded
 #      - EmpiricalLogTail normalization;
-#      - targets are processed concurrently (outer_execution=ThreadedExecution());
-#      - scan and normalization work inside each target uses SerialExecution.
-#
-# Nested threaded execution is intentionally not used: Mimosa permits threading
-# at either the outer target level or the inner scan/normalization level.
+#      - targets are processed serially;
+#      - computational kernels inside each target use ThreadedExecution.
 #
 # Environment overrides:
 #   MIMOSA_BENCH_N_SEQUENCES, MIMOSA_BENCH_SEQ_LENGTH,
@@ -68,18 +65,17 @@ end
 
 fmt_ms(nanoseconds::Real) = @sprintf("%.3f", nanoseconds / 1.0e6)
 
-struct BenchmarkCase{N<:AbstractNormalizationStrategy,O<:ExecutionPolicy,S<:ExecutionPolicy}
+struct BenchmarkCase{N<:AbstractNormalizationStrategy,E<:ExecutionPolicy}
     label::String
     normalization::N
-    outer_execution::O
-    scan_execution::S
+    execution::E
 end
 
 function show_case(case::BenchmarkCase)
     println("  $(case.label)")
     println("    normalization : $(normalization_fingerprint(case.normalization))")
-    println("    outer targets : $(case.outer_execution)")
-    return println("    inner work    : $(case.scan_execution)")
+    println("    targets       : serial")
+    return println("    kernels       : $(case.execution)")
 end
 
 function benchmark_case(
@@ -98,7 +94,7 @@ function benchmark_case(
         background=background,
         min_logfpr=MIN_LOGFPR,
         normalization=case.normalization,
-        scan_execution=case.scan_execution,
+        execution=case.execution,
     )
     query_times = bench_repeat(prepare_query, repetitions)
     query_stats = stats(query_times)
@@ -114,7 +110,7 @@ function benchmark_case(
         target_models[1],
         sequences;
         background=background,
-        scan_execution=case.scan_execution,
+        execution=case.execution,
         metric=:co,
         search_range=10,
         window_radius=5,
@@ -132,8 +128,7 @@ function benchmark_case(
         target_models,
         sequences;
         background=background,
-        outer_execution=case.outer_execution,
-        scan_execution=case.scan_execution,
+        execution=case.execution,
         metric=:co,
         search_range=10,
         window_radius=5,
@@ -148,21 +143,21 @@ function benchmark_case(
         "median=$(fmt_ms(many_stats.median_ns)) ms  " *
         "max=$(fmt_ms(many_stats.max_ns)) ms",
     )
-    println(@sprintf("  per target: %.3f ms; throughput: %.1f targets/s", per_target_ms, throughput))
-
-    return (
-        case=case,
-        query=query_stats,
-        one=one_stats,
-        many=many_stats,
-        results=results,
+    println(
+        @sprintf(
+            "  per target: %.3f ms; throughput: %.1f targets/s", per_target_ms, throughput
+        )
     )
+
+    return (case=case, query=query_stats, one=one_stats, many=many_stats, results=results)
 end
 
 function compare_outputs(exact_results, hybrid_results)
     length(exact_results) == length(hybrid_results) ||
         error("benchmark strategies returned different result counts")
-    score_deltas = abs.(getproperty.(exact_results, :score) .- getproperty.(hybrid_results, :score))
+    score_deltas = abs.(
+        getproperty.(exact_results, :score) .- getproperty.(hybrid_results, :score)
+    )
     offset_changes = count(
         index -> exact_results[index].offset != hybrid_results[index].offset,
         eachindex(exact_results),
@@ -203,18 +198,13 @@ function main()
     N_REPS > 0 || error("MIMOSA_BENCH_N_REPS must be positive")
 
     threaded = ThreadedExecution()
-    hybrid_case = BenchmarkCase(
-        "Hybrid inner-threaded",
-        HybridEmpiricalLogTail(HYBRID_BINS),
-        SerialExecution(),
-        threaded,
+    hybrid_serial_case = BenchmarkCase(
+        "Hybrid serial", HybridEmpiricalLogTail(HYBRID_BINS), SerialExecution()
     )
-    exact_case = BenchmarkCase(
-        "Exact target-threaded",
-        Mimosa.EmpiricalLogTail(),
-        threaded,
-        SerialExecution(),
+    hybrid_threaded_case = BenchmarkCase(
+        "Hybrid inner-threaded", HybridEmpiricalLogTail(HYBRID_BINS), threaded
     )
+    exact_case = BenchmarkCase("Exact inner-threaded", Mimosa.EmpiricalLogTail(), threaded)
 
     println("=" ^ 76)
     println("  Mimosa.jl — 1-vs-$N_TARGETS normalization/execution benchmark")
@@ -230,12 +220,13 @@ function main()
     println("  Julia threads      : $(Threads.nthreads())")
     println("  Date               : $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
     println("\nExecution cases:")
-    show_case(hybrid_case)
+    show_case(hybrid_serial_case)
+    show_case(hybrid_threaded_case)
     show_case(exact_case)
     println("=" ^ 76)
 
     generated = elapsed() do
-        make_random_sequences(N_SEQUENCES, SEQ_LENGTH; seed=SEED)
+        return make_random_sequences(N_SEQUENCES, SEQ_LENGTH; seed=SEED)
     end
     sequences = generated.value
     println(
@@ -246,28 +237,37 @@ function main()
     query_model = make_pwm(PWM_WIDTH, SEED)
     target_models = [make_pwm(PWM_WIDTH, SEED + 100 + index) for index in 1:N_TARGETS]
 
-    # Run Hybrid first because it is the strategy under evaluation. Both cases
-    # perform their own warm-up before measured samples.
-    hybrid = benchmark_case(
-        hybrid_case, query_model, target_models, sequences, N_REPS
+    # Every case performs its own warm-up before measured samples.
+    hybrid_serial = benchmark_case(
+        hybrid_serial_case, query_model, target_models, sequences, N_REPS
+    )
+    hybrid_threaded = benchmark_case(
+        hybrid_threaded_case, query_model, target_models, sequences, N_REPS
     )
     exact = benchmark_case(exact_case, query_model, target_models, sequences, N_REPS)
-    differences = compare_outputs(exact.results, hybrid.results)
+    hybrid_serial.results == hybrid_threaded.results ||
+        error("serial and threaded Hybrid results differ")
+    differences = compare_outputs(exact.results, hybrid_threaded.results)
 
-    hybrid_ns = Float64(hybrid.many.median_ns)
+    hybrid_serial_ns = Float64(hybrid_serial.many.median_ns)
+    hybrid_threaded_ns = Float64(hybrid_threaded.many.median_ns)
     exact_ns = Float64(exact.many.median_ns)
     println("\n" * "=" ^ 76)
     println("  SUMMARY")
     println("=" ^ 76)
+    println("  Hybrid serial          1-vs-$N_TARGETS: $(fmt_ms(hybrid_serial_ns)) ms")
     println(
-        "  Hybrid inner-threaded  1-vs-$N_TARGETS: $(fmt_ms(hybrid_ns)) ms " *
-        "($(normalization_fingerprint(hybrid_case.normalization)))",
+        "  Hybrid inner-threaded  1-vs-$N_TARGETS: $(fmt_ms(hybrid_threaded_ns)) ms " *
+        "($(normalization_fingerprint(hybrid_threaded_case.normalization)))",
     )
     println(
-        "  Exact target-threaded  1-vs-$N_TARGETS: $(fmt_ms(exact_ns)) ms " *
+        "  Exact inner-threaded   1-vs-$N_TARGETS: $(fmt_ms(exact_ns)) ms " *
         "($(normalization_fingerprint(exact_case.normalization)))",
     )
-    println(@sprintf("  Hybrid / Exact time ratio: %.3fx", hybrid_ns / exact_ns))
+    println(
+        @sprintf("  Hybrid kernel speedup: %.3fx", hybrid_serial_ns / hybrid_threaded_ns,)
+    )
+    println(@sprintf("  Hybrid / Exact time ratio: %.3fx", hybrid_threaded_ns / exact_ns))
     println("\n  Result differences (Hybrid versus Exact):")
     println(@sprintf("    mean |Δscore| : %.7f", differences.mean_score_delta))
     println(@sprintf("    max  |Δscore| : %.7f", differences.max_score_delta))
@@ -278,10 +278,9 @@ function main()
     println("\n  Sample results (first $(min(5, N_TARGETS)) targets):")
     for index in 1:min(5, N_TARGETS)
         exact_result = exact.results[index]
-        hybrid_result = hybrid.results[index]
+        hybrid_result = hybrid_threaded.results[index]
         println(
-            "    $(exact_result.target): " *
-            @sprintf(
+            "    $(exact_result.target): " * @sprintf(
                 "exact=%.4f hybrid=%.4f Δ=%+.5f",
                 exact_result.score,
                 hybrid_result.score,

@@ -174,8 +174,7 @@ end
 
 """
     build_null(models; sequences=batch, metric=:co, n_samples=2000,
-               shuffle=false, seed=127, outer_execution=SerialExecution(),
-               scan_execution=SerialExecution())
+               shuffle=false, seed=127, execution=SerialExecution())
 
 Build a null distribution from randomly sampled query-target comparisons.
 
@@ -190,17 +189,14 @@ distribution.
 - `n_samples`: number of random comparisons (default 2000).
 - `shuffle`: shuffle PWM columns and A/C/G/T weights within each column.
 - `seed`: random seed for reproducible sampling and shuffling.
-- `outer_execution`: [`ExecutionPolicy`](@ref) for parallel comparison of query-target
-  pairs. Default `SerialExecution()`.
-- `scan_execution`: policy for scanning sequences and applying normalization
-  within one pair. It must not be multi-threaded together with `outer_execution`.
+- `execution`: [`ExecutionPolicy`](@ref) for scanning, normalization, anchor
+  collection, and profile alignment within each comparison.
 
 Returns a [`NullBuildResult`](@ref).
 
-Under `ThreadedExecution`, comparisons are processed in parallel at the
-top level. Results are collected into pre-allocated slots indexed by
-the original comparison order, so the pooled score order and fit are
-identical to `SerialExecution`.
+Models and sampled pairs are processed in stable order. Under
+`ThreadedExecution`, the computational kernels within each model comparison
+use multiple Julia threads and preserve serial numerical results.
 """
 function build_null(
     models::AbstractVector;
@@ -208,8 +204,7 @@ function build_null(
     n_samples::Int=2000,
     shuffle::Bool=false,
     seed::Int=127,
-    outer_execution::ExecutionPolicy=SerialExecution(),
-    scan_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
     sequences::EncodedSequenceBatch,
     background::Union{Nothing,EncodedSequenceBatch}=nothing,
     search_range::Int=10,
@@ -224,8 +219,7 @@ function build_null(
     return build_null(
         models,
         config;
-        outer_execution=outer_execution,
-        scan_execution=scan_execution,
+        execution=execution,
         sequences=sequences,
         background=background,
         search_range=search_range,
@@ -239,8 +233,7 @@ end
 function build_null(
     models::AbstractVector,
     config::NullBuildConfig{<:AbstractProfileMetric};
-    outer_execution::ExecutionPolicy=SerialExecution(),
-    scan_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
     sequences::EncodedSequenceBatch,
     background::Union{Nothing,EncodedSequenceBatch}=nothing,
     search_range::Int=10,
@@ -249,7 +242,6 @@ function build_null(
     min_logfpr::Real=0.0,
     normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
 )
-    _validate_execution_levels(outer_execution, scan_execution)
     length(models) >= 2 ||
         throw(ArgumentError("at least two models are required for null construction."))
     all(model -> model isa AbstractMotifModel, models) ||
@@ -271,23 +263,21 @@ function build_null(
     prepared = Vector{Union{Nothing,PreparedProfile}}(undef, length(models))
     fill!(prepared, nothing)
     reusable = findall(model -> !config.shuffle || !(model isa PWM), models)
-    _parallel_for(outer_execution, length(reusable)) do i
-        model_index = reusable[i]
+    for model_index in reusable
         prepared[model_index] = prepare_profile(
             models[model_index],
             sequences;
             background=background,
             min_logfpr=min_logfpr,
             normalization=normalization,
-            scan_execution=scan_execution,
+            execution=execution,
         )
-        return nothing
     end
 
     work_items = _null_work_items(length(models), config)
     raw_scores = Vector{Float64}(undef, config.n_samples)
     pairs = Vector{NullPair}(undef, config.n_samples)
-    _parallel_for(outer_execution, config.n_samples) do i
+    for i in 1:config.n_samples
         item = work_items[i]
         query = models[item.query]
         target = models[item.target]
@@ -298,7 +288,7 @@ function build_null(
                 background=background,
                 min_logfpr=min_logfpr,
                 normalization=normalization,
-                scan_execution=scan_execution,
+                execution=execution,
             )
         else
             prepared[item.query]::PreparedProfile
@@ -310,7 +300,7 @@ function build_null(
                 background=background,
                 min_logfpr=min_logfpr,
                 normalization=normalization,
-                scan_execution=scan_execution,
+                execution=execution,
             )
         else
             prepared[item.target]::PreparedProfile
@@ -322,12 +312,11 @@ function build_null(
             search_range=search_range,
             window_radius=window_radius,
             realign_window=realign_window,
+            execution=execution,
         )
         score = Float64(result.score)
         raw_scores[i] = score
-        return pairs[i] = NullPair(
-            String(modelname(query)), String(modelname(target)), score
-        )
+        pairs[i] = NullPair(String(modelname(query)), String(modelname(target)), score)
     end
 
     fit_result = fit_gev(raw_scores)

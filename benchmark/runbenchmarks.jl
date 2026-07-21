@@ -705,7 +705,7 @@ function bench_one_to_many!(results::Vector{BenchResult}, config::BenchConfig)
             compare(
                 prepared,
                 targets;
-                outer_execution=execution,
+                execution=execution,
                 metric=:co,
                 search_range=10,
                 window_radius=5,
@@ -713,7 +713,7 @@ function bench_one_to_many!(results::Vector{BenchResult}, config::BenchConfig)
             b = BenchmarkTools.@benchmark compare(
                 $prepared,
                 $targets;
-                outer_execution=($execution),
+                execution=($execution),
                 metric=:co,
                 search_range=10,
                 window_radius=5,

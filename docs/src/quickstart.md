@@ -125,20 +125,20 @@ motif comparison, thread sequence scanning explicitly:
 ```julia
 comparison = compare(
     query, target, sequences;
-    scan_execution=ThreadedExecution(4),
+    execution=ThreadedExecution(4),
 )
 ```
 
-For `build_null` and one-to-many comparisons, use `outer_execution=ThreadedExecution(4)`
-and leave `scan_execution` serial. The two levels may not both use multiple
-threads.
+Use the same `execution` policy for `build_null` and one-to-many comparisons.
+Targets remain serial while each comparison uses threaded computational
+kernels.
 
 ```julia
 scores = scan(
     model,
     sequences;
     strands=BestStrand(),
-    outer_execution=ThreadedExecution(4),
+    execution=ThreadedExecution(4),
 )
 ```
 

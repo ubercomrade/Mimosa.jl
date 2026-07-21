@@ -106,7 +106,10 @@ end
 end
 
 function transform_directory!(
-    output::Vector{Float32}, table::LogTailTable, directory::RadixDirectory, input::Vector{Float32}
+    output::Vector{Float32},
+    table::LogTailTable,
+    directory::RadixDirectory,
+    input::Vector{Float32},
 )
     Threads.@threads :static for chunk in 1:Threads.nthreads()
         first = fld((chunk - 1) * length(input), Threads.nthreads()) + 1
@@ -127,7 +130,7 @@ function scan_calibration_direct(model::AbstractMotifModel, batch::EncodedSequen
         last = offsets[row_index + 1] - 1
         length = last - first + 1
         forward = @view(data[first:last])
-        reverse = @view(data[n + first:n + last])
+        reverse = @view(data[(n + first):(n + last)])
         Mimosa.scan_both!(forward, reverse, model, sequence(batch, row_index), length)
     end
     return data
@@ -266,13 +269,20 @@ function approximation_error(
         p95=errors[cld(95 * length(errors), 100)],
         maximum=last(errors),
         tail_count=length(tail_errors),
-        tail_p95=isempty(tail_errors) ? 0.0f0 : tail_errors[cld(95 * length(tail_errors), 100)],
+        tail_p95=if isempty(tail_errors)
+            0.0f0
+        else
+            tail_errors[cld(95 * length(tail_errors), 100)]
+        end,
         tail_max=isempty(tail_errors) ? 0.0f0 : last(tail_errors),
     )
 end
 
 function hybrid_error(
-    exact::LogTailTable, approximate::HistogramTable, values::Vector{Float32}; tail_logfpr::Float32=3.0f0
+    exact::LogTailTable,
+    approximate::HistogramTable,
+    values::Vector{Float32};
+    tail_logfpr::Float32=3.0f0,
 )
     cutoff_index = findlast(>=(tail_logfpr), exact.log_tail)
     cutoff_index === nothing && return nothing
@@ -282,7 +292,9 @@ function hybrid_error(
     )
     errors = Vector{Float32}(undef, length(values))
     @inbounds for index in eachindex(values)
-        errors[index] = abs(lookup_score(exact, values[index]) - lookup_hybrid(hybrid, values[index]))
+        errors[index] = abs(
+            lookup_score(exact, values[index]) - lookup_hybrid(hybrid, values[index])
+        )
     end
     sort!(errors)
     return (
@@ -316,7 +328,9 @@ function fit_sorted_table!(scores::Vector{Float32}, total::Int=length(scores))
     return LogTailTable(scores, log_tail)
 end
 
-function collect_histogram_tail(scores::Vector{Float32}, histogram::HistogramTable, tail_logfpr::Float32)
+function collect_histogram_tail(
+    scores::Vector{Float32}, histogram::HistogramTable, tail_logfpr::Float32
+)
     bin = findfirst(>=(tail_logfpr), histogram.tail)
     bin === nothing && return Float32[]
     cutoff = histogram.lower + Float32(bin - 1) * histogram.width
@@ -330,8 +344,7 @@ function collect_histogram_tail(scores::Vector{Float32}, histogram::HistogramTab
 end
 
 function normalize_hybrid_bundle(
-    table::HybridHistogramTable,
-    bundle::StrandPair{<:RaggedArray{Float32}},
+    table::HybridHistogramTable, bundle::StrandPair{<:RaggedArray{Float32}}
 )
     function transform(data::Vector{Float32})
         output = similar(data)
@@ -358,7 +371,10 @@ function prepare_exact_variant(
     sorted = similar(calibration)
     partition_sort!(sorted, calibration, PARTITION_BITS)
     table = fit_sorted_table!(sorted)
-    return (table=table, bundle=normalize_bundle(table, foreground; scan_execution=ThreadedExecution()))
+    return (
+        table=table,
+        bundle=normalize_bundle(table, foreground; execution=ThreadedExecution()),
+    )
 end
 
 function prepare_hybrid_variant(
@@ -408,36 +424,49 @@ function compare_variants(
 )
     exact_anchors = Mimosa._collect_both_anchors(exact_bundle, threshold)
     hybrid_anchors = Mimosa._collect_both_anchors(hybrid_bundle, threshold)
-    config = Mimosa.ProfileConfig(
-        metric=Mimosa.OverlapCoefficient(), search_range=10, window_radius=5,
+    config = Mimosa.ProfileConfig(;
+        metric=Mimosa.OverlapCoefficient(),
+        search_range=10,
+        window_radius=5,
         min_logfpr=threshold,
     )
     exact_result = Mimosa.profile_compare(
-        query.bundle, query.anchors, exact_bundle, exact_anchors, config,
+        query.bundle, query.anchors, exact_bundle, exact_anchors, config
     )
     hybrid_result = Mimosa.profile_compare(
-        query.bundle, query.anchors, hybrid_bundle, hybrid_anchors, config,
+        query.bundle, query.anchors, hybrid_bundle, hybrid_anchors, config
     )
     return (
         exact_result=exact_result,
         hybrid_result=hybrid_result,
-        exact_anchors=(length(exact_anchors[1].positions), length(exact_anchors[2].positions)),
-        hybrid_anchors=(length(hybrid_anchors[1].positions), length(hybrid_anchors[2].positions)),
-        overlap=(anchor_overlap(exact_anchors[1], hybrid_anchors[1]), anchor_overlap(exact_anchors[2], hybrid_anchors[2])),
+        exact_anchors=(
+            length(exact_anchors[1].positions), length(exact_anchors[2].positions)
+        ),
+        hybrid_anchors=(
+            length(hybrid_anchors[1].positions), length(hybrid_anchors[2].positions)
+        ),
+        overlap=(
+            anchor_overlap(exact_anchors[1], hybrid_anchors[1]),
+            anchor_overlap(exact_anchors[2], hybrid_anchors[2]),
+        ),
     )
 end
 
 function show_measure(label::String, result)
-    println(
+    return println(
         rpad(label, 54),
-        @sprintf("%8.3f ms  %8.1f MiB allocated", result.seconds * 1e3, result.bytes / 2.0^20),
+        @sprintf(
+            "%8.3f ms  %8.1f MiB allocated", result.seconds * 1e3, result.bytes / 2.0^20
+        ),
     )
 end
 
 function main()
     println("Mimosa normalization options benchmark")
     println("  Julia threads: $(Threads.nthreads())")
-    println("  background: $N_BACKGROUND × $BACKGROUND_LENGTH; foreground: $N_FOREGROUND × $FOREGROUND_LENGTH")
+    println(
+        "  background: $N_BACKGROUND × $BACKGROUND_LENGTH; foreground: $N_FOREGROUND × $FOREGROUND_LENGTH",
+    )
     model = make_pwm(PWM_WIDTH, SEED)
     background = make_random_sequences(N_BACKGROUND, BACKGROUND_LENGTH; seed=SEED)
     foreground = make_random_sequences(N_FOREGROUND, FOREGROUND_LENGTH; seed=SEED + 1)
@@ -446,20 +475,43 @@ function main()
     direct = scan_calibration_direct(model, background)
     @assert current == direct
     println("\n[1] Direct contiguous calibration scan")
-    show_measure("current: two strand arrays + calibration copy", median_measure(() -> scan_calibration_current(model, background)))
-    show_measure("direct: one calibration buffer", median_measure(() -> scan_calibration_direct(model, background)))
+    show_measure(
+        "current: two strand arrays + calibration copy",
+        median_measure(() -> scan_calibration_current(model, background)),
+    )
+    show_measure(
+        "direct: one calibration buffer",
+        median_measure(() -> scan_calibration_direct(model, background)),
+    )
 
     exact_table = Mimosa._fit_empirical_table!(copy(direct))
-    foreground_raw = scan(model, foreground; strands=BothStrands(), execution=ThreadedExecution())
+    foreground_raw = scan(
+        model, foreground; strands=BothStrands(), execution=ThreadedExecution()
+    )
     foreground_values = vcat(foreground_raw.forward.data, foreground_raw.reverse.data)
     directory = build_directory(exact_table.scores, DIRECTORY_BITS)
     directory_output = similar(foreground_values)
     @inbounds for score in foreground_values
-        @assert lookup_score(exact_table, score) == lookup_directory(exact_table, directory, score)
+        @assert lookup_score(exact_table, score) ==
+            lookup_directory(exact_table, directory, score)
     end
     println("\n[2] Exact foreground lookup")
-    show_measure("current: sortperm + linear merge (both strands)", median_measure(() -> normalize_bundle(exact_table, foreground_raw; scan_execution=ThreadedExecution())))
-    show_measure("directory: independent exact lookups", median_measure(() -> transform_directory!(directory_output, exact_table, directory, foreground_values)))
+    show_measure(
+        "current: sortperm + linear merge (both strands)",
+        median_measure(
+            () -> normalize_bundle(
+                exact_table, foreground_raw; execution=ThreadedExecution()
+            ),
+        ),
+    )
+    show_measure(
+        "directory: independent exact lookups",
+        median_measure(
+            () -> transform_directory!(
+                directory_output, exact_table, directory, foreground_values
+            ),
+        ),
+    )
 
     sorted = copy(direct)
     partitioned = similar(direct)
@@ -471,13 +523,22 @@ function main()
     @assert partition_table.log_tail == exact_table.log_tail
     println("\n[3] Exact calibration sort")
     show_measure("current: Base.sort!", median_measure(() -> sort!(copy(direct); rev=true)))
-    show_measure("partition + bucket-local sort", median_measure(() -> partition_sort!(partitioned, direct, PARTITION_BITS)))
+    show_measure(
+        "partition + bucket-local sort",
+        median_measure(() -> partition_sort!(partitioned, direct, PARTITION_BITS)),
+    )
 
     workspace = CalibrationWorkspace(length(direct))
     fit_reusing_workspace!(workspace, direct)
     println("\n[5] Reusable calibration workspace")
-    show_measure("new workspace per fit", median_measure(() -> Mimosa._fit_empirical_table!(copy(direct))))
-    show_measure("reuse score workspace", median_measure(() -> fit_reusing_workspace!(workspace, direct)))
+    show_measure(
+        "new workspace per fit",
+        median_measure(() -> Mimosa._fit_empirical_table!(copy(direct))),
+    )
+    show_measure(
+        "reuse score workspace",
+        median_measure(() -> fit_reusing_workspace!(workspace, direct)),
+    )
 
     println("\n[7] Approximate histogram table; foreground error vs exact")
     for nbins in (256, 4096, 65536)
@@ -488,14 +549,23 @@ function main()
         println(
             @sprintf(
                 "  error: mean=%.5f p95=%.5f max=%.5f | tail>=3: n=%d p95=%.5f max=%.5f",
-                error.mean, error.p95, error.maximum, error.tail_count, error.tail_p95, error.tail_max,
+                error.mean,
+                error.p95,
+                error.maximum,
+                error.tail_count,
+                error.tail_p95,
+                error.tail_max,
             ),
         )
         hybrid = hybrid_error(exact_table, histogram, foreground_values)
         println(
             @sprintf(
                 "  hybrid exact tail>=3: %d table entries, cutoff=%.5f; mean=%.5f p95=%.5f max=%.5f",
-                hybrid.entries, hybrid.cutoff, hybrid.mean, hybrid.p95, hybrid.maximum,
+                hybrid.entries,
+                hybrid.cutoff,
+                hybrid.mean,
+                hybrid.p95,
+                hybrid.maximum,
             ),
         )
     end
@@ -523,32 +593,49 @@ function main()
     for bins in (4096, 65536)
         hybrid_timing = median_timing(
             () -> prepare_hybrid_variant(
-                model, target_raw, background; bins=bins, tail_logfpr=3.0f0,
+                model, target_raw, background; bins=bins, tail_logfpr=3.0f0
             ),
         )
-        show_measure("hybrid: direct scan + $bins-bin histogram + exact tail", hybrid_timing)
+        show_measure(
+            "hybrid: direct scan + $bins-bin histogram + exact tail", hybrid_timing
+        )
         hybrid_prepared = prepare_hybrid_variant(
-            model, target_raw, background; bins=bins, tail_logfpr=3.0f0,
+            model, target_raw, background; bins=bins, tail_logfpr=3.0f0
         )
         query_model = make_pwm(PWM_WIDTH, SEED + 99)
         for threshold in (0.0f0, 3.0f0)
             query = prepare_profile(
-                query_model, foreground; background=background, min_logfpr=threshold,
+                query_model,
+                foreground;
+                background=background,
+                min_logfpr=threshold,
                 normalization=Mimosa.EmpiricalLogTail(),
-                scan_execution=ThreadedExecution(),
+                execution=ThreadedExecution(),
             )
-            compared = compare_variants(exact_bundle, hybrid_prepared.bundle, query, threshold)
+            compared = compare_variants(
+                exact_bundle, hybrid_prepared.bundle, query, threshold
+            )
             exact_result = compared.exact_result
             hybrid_result = compared.hybrid_result
             println(
                 @sprintf(
                     "  bins=%d threshold=%.0f: anchors exact=(%d,%d), hybrid=(%d,%d), shared=(%d,%d); ",
-                    bins, threshold,
-                    compared.exact_anchors..., compared.hybrid_anchors..., compared.overlap...,
+                    bins,
+                    threshold,
+                    compared.exact_anchors...,
+                    compared.hybrid_anchors...,
+                    compared.overlap...,
                 ) * @sprintf(
                     "compare score %.7f→%.7f (Δ=%.7f), offset %d→%d, orient %s→%s, sites %d→%d",
-                    exact_result[1], hybrid_result[1], hybrid_result[1] - exact_result[1],
-                    exact_result[2], hybrid_result[2], exact_result[3], hybrid_result[3], exact_result[4], hybrid_result[4],
+                    exact_result[1],
+                    hybrid_result[1],
+                    hybrid_result[1] - exact_result[1],
+                    exact_result[2],
+                    hybrid_result[2],
+                    exact_result[3],
+                    hybrid_result[3],
+                    exact_result[4],
+                    hybrid_result[4],
                 ),
             )
         end

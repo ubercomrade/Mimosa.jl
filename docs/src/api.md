@@ -96,13 +96,10 @@ scores = scan(
 
 Serial and threaded execution preserve result order and exact discrete fields.
 
-For profile comparisons and `build_null`, `outer_execution` is the outer level
-(targets or null pairs) and `scan_execution` controls scanning sequences within
-one profile. Choose one threaded level: using multi-threaded policies for both
-throws `ArgumentError`. For one scalar comparison use
-`scan_execution=ThreadedExecution(n)`; for many targets or null pairs use
-`outer_execution=ThreadedExecution(n)` with the default
-serial `scan_execution`.
+Profile comparisons and `build_null` use the same `execution` keyword.
+Targets and null pairs retain stable serial order; scanning, Hybrid
+normalization, anchor collection, and profile alignment use the requested
+threads within each comparison.
 
 ## Compare motif models
 
@@ -176,7 +173,7 @@ results = compare(
     [target, readmodel("examples/foxa2.meme")],
     sequences;
     metric=:cosine,
-    outer_execution=ThreadedExecution(4),
+    execution=ThreadedExecution(4),
     cache=cache,
 )
 ```

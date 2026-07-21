@@ -237,7 +237,11 @@ function _annotate_cli_result(
         throw(CLIError("--pvalue requires an explicit --null-distribution bundle."))
     dist = loadnull(parsed.options["null-distribution"])
     dist.contract.normalization_version == normalization_fingerprint(normalization) ||
-        throw(CLIError("null distribution normalization is incompatible with this comparison."))
+        throw(
+            CLIError(
+                "null distribution normalization is incompatible with this comparison."
+            ),
+        )
     _validate_null_compatibility(
         dist;
         strategy=strategy,
@@ -400,7 +404,7 @@ function _run_profile(parsed::CLIParsed)
             min_logfpr=min_logfpr,
             background=bg_sequences,
             normalization=normalization,
-            scan_execution=execution,
+            execution=execution,
             cache=cache,
         )
     end
@@ -569,7 +573,7 @@ function _run_build_null(parsed::CLIParsed)
         n_samples=n_samples,
         shuffle=shuffle,
         seed=seed,
-        outer_execution=exec_policy,
+        execution=exec_policy,
         sequences=sequences,
         search_range=search_range,
         window_radius=window_radius,

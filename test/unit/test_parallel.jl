@@ -64,7 +64,7 @@ end
     end
 end
 
-@testset "bounded, weighted, and nested execution" begin
+@testset "bounded and weighted execution" begin
     @test Mimosa._effective_ntasks(ThreadedExecution(100), 100) == Threads.nthreads()
 
     visits = zeros(Int, 37)
@@ -73,18 +73,6 @@ end
         visits[i] += 1
     end
     @test visits == ones(Int, length(visits))
-
-    outer_threads = zeros(Int, 4)
-    inner_threads = zeros(Int, 4, 5)
-    Mimosa._parallel_for(ThreadedExecution(4), 4) do i
-        outer_threads[i] = Threads.threadid()
-        Mimosa._parallel_for(ThreadedExecution(4), 5) do j
-            inner_threads[i, j] = Threads.threadid()
-        end
-    end
-    for i in eachindex(outer_threads)
-        @test all(==(outer_threads[i]), @view(inner_threads[i, :]))
-    end
 end
 
 @testset "Serial/threaded scan equivalence" begin

@@ -13,6 +13,22 @@ end
     @test prepared.normalization == HybridEmpiricalLogTail()
 end
 
+@testset "Hybrid normalization serial/threaded equivalence" begin
+    scores = Float32[sin(index / 7) + (index % 11) / 10 for index in 1:10_000]
+    strategy = HybridEmpiricalLogTail(256)
+    serial = fit(strategy, scores; tail_logfpr=2.0, execution=SerialExecution())
+    threaded = fit(strategy, scores; tail_logfpr=2.0, execution=ThreadedExecution(4))
+
+    @test threaded.minimum == serial.minimum
+    @test threaded.bin_width == serial.bin_width
+    @test threaded.log_tail == serial.log_tail
+    @test threaded.exact_tail.scores == serial.exact_tail.scores
+    @test threaded.exact_tail.log_tail == serial.exact_tail.log_tail
+    @test_throws ArgumentError fit(
+        strategy, Float32[1.0, NaN32]; execution=ThreadedExecution(2)
+    )
+end
+
 @testset "LogTailTable fit" begin
     # Empty input
     t = fit(ExactEmpiricalLogTail(), Float32[])
@@ -79,9 +95,7 @@ end
 @testset "sorted transform matches scalar lookup" begin
     table = fit(ExactEmpiricalLogTail(), Float32[4, 4, 3, 1, -2, -2])
     rag = build_ragged([
-        Float32[8, 4, 3.5, 3, 2, 1, 0, -2, -3],
-        Float32[4, 4, -2],
-        Float32[],
+        Float32[8, 4, 3.5, 3, 2, 1, 0, -2, -3], Float32[4, 4, -2], Float32[]
     ])
     expected = Float32[lookup_score(table, score) for score in rag.data]
 
@@ -90,7 +104,7 @@ end
     @test transformed.offsets == rag.offsets
 
     if Threads.nthreads() > 1
-        threaded = transform_scores(table, rag; scan_execution=ThreadedExecution(2))
+        threaded = transform_scores(table, rag; execution=ThreadedExecution(2))
         @test threaded == transformed
     end
 end
@@ -203,6 +217,18 @@ end
     @test positions == [2, 1, 3]
 end
 
+@testset "anchor CSR serial/threaded equivalence" begin
+    scores = build_ragged([Float32[0.1, 0.9, 0.9], Float32[], Float32[0.8, 0.2, 0.7, 0.8]])
+    for threshold in (0.0f0, 0.75f0)
+        serial = Mimosa.collect_anchor_csr(scores, threshold)
+        threaded = Mimosa.collect_anchor_csr(
+            scores, threshold; execution=ThreadedExecution(4)
+        )
+        @test threaded.positions == serial.positions
+        @test threaded.offsets == serial.offsets
+    end
+end
+
 @testset "ProfileConfig defaults" begin
     config = ProfileConfig()
     @test config.metric isa OverlapCoefficient
@@ -263,7 +289,12 @@ end
     @test results[2].target == "target2"
 
     thresholded = prepare_profile(sp1; min_logfpr=0.25)
-    @test compare(thresholded, sp2; search_range=3, window_radius=2).score isa Float32
+    threshold_serial = compare(thresholded, sp2; search_range=3, window_radius=2)
+    threshold_threaded = compare(
+        thresholded, sp2; search_range=3, window_radius=2, execution=ThreadedExecution(4)
+    )
+    @test threshold_serial.score isa Float32
+    @test threshold_threaded == threshold_serial
     @test_throws ArgumentError compare(
         thresholded, sp2; search_range=3, window_radius=2, min_logfpr=0.0
     )
@@ -303,7 +334,7 @@ end
         search_range=2,
         window_radius=1,
         realign_window=1,
-        outer_execution=SerialExecution(),
+        execution=SerialExecution(),
     )
     prepared = compare(
         prepare_profile(query, batch),
@@ -313,7 +344,7 @@ end
         search_range=2,
         window_radius=1,
         realign_window=1,
-        outer_execution=SerialExecution(),
+        execution=SerialExecution(),
     )
     @test [r.target for r in serial] == ["target1", "target2"]
     @test prepared == serial
@@ -326,7 +357,7 @@ end
         search_range=2,
         window_radius=1,
         realign_window=1,
-        outer_execution=ThreadedExecution(4),
+        execution=ThreadedExecution(4),
     )
     @test threaded == serial
 
@@ -338,17 +369,7 @@ end
         search_range=2,
         window_radius=1,
         realign_window=1,
-        scan_execution=ThreadedExecution(2),
+        execution=ThreadedExecution(2),
     )
     @test scan_threaded == serial[1]
-
-    if Threads.nthreads() > 1
-        @test_throws ArgumentError compare(
-            query,
-            targets,
-            batch;
-            outer_execution=ThreadedExecution(2),
-            scan_execution=ThreadedExecution(2),
-        )
-    end
 end

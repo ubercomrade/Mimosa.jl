@@ -32,17 +32,23 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Real=0.0,
     normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
+    execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)
 
     return compare(
-        prepare_profile(query; min_logfpr=Float32(min_logfpr), normalization, cache=cache),
-        prepare_profile(target; min_logfpr=Float32(min_logfpr), normalization, cache=cache);
+        prepare_profile(
+            query; min_logfpr=Float32(min_logfpr), normalization, execution, cache
+        ),
+        prepare_profile(
+            target; min_logfpr=Float32(min_logfpr), normalization, execution, cache
+        );
         metric=m,
         search_range=search_range,
         window_radius=window_radius,
         realign_window=realign_window,
+        execution,
     )
 end
 
@@ -107,25 +113,27 @@ function compare(
     min_logfpr::Real=0.0,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
-    scan_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)
     threshold = Float32(min_logfpr)
     prepared_query = prepare_profile(
-        query, sequences;
+        query,
+        sequences;
         background=background,
         min_logfpr=threshold,
         normalization=normalization,
-        scan_execution=scan_execution,
+        execution=execution,
         cache=cache,
     )
     prepared_target = prepare_profile(
-        target, sequences;
+        target,
+        sequences;
         background=background,
         min_logfpr=threshold,
         normalization=normalization,
-        scan_execution=scan_execution,
+        execution=execution,
         cache=cache,
     )
     config = ProfileConfig(;
@@ -140,7 +148,8 @@ function compare(
         prepared_query.anchors,
         prepared_target.bundle,
         prepared_target.anchors,
-        config,
+        config;
+        execution,
     )
     return ComparisonResult(
         String(modelname(query)),

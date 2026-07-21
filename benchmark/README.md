@@ -143,24 +143,24 @@ The `bench_1v50.jl` script compares two end-to-end execution strategies for
 | Window radius | 5 |
 | Repetitions per measurement | 5 |
 
-The benchmark compares two mutually exclusive parallel execution levels:
+The benchmark compares two normalization strategies under the same
+kernel-only parallel execution model:
 
-| Case | Normalization | Target-level execution | Inner scan/normalization execution |
-|------|---------------|------------------------|------------------------------------|
-| Hybrid inner-threaded | `HybridEmpiricalLogTail` | `SerialExecution()` | `ThreadedExecution()` |
-| Exact target-threaded | `EmpiricalLogTail` | `ThreadedExecution()` | `SerialExecution()` |
+| Case | Normalization | Target order | Computational kernels |
+|------|---------------|--------------|-----------------------|
+| Hybrid serial | `HybridEmpiricalLogTail` | Serial | `SerialExecution()` |
+| Hybrid inner-threaded | `HybridEmpiricalLogTail` | Serial | `ThreadedExecution()` |
+| Exact inner-threaded | `EmpiricalLogTail` | Serial | `ThreadedExecution()` |
 
-Mimosa does not allow nested target-level and inner multithreading. In the
-Hybrid case, targets are processed one at a time while scanning, histogram
-fitting, and score transformation use the available Julia threads. In the
-Exact case, targets are processed concurrently and each target owns a serial
-scan/normalization path. Profile alignment itself has no execution policy and
-is serial inside each target in both cases.
+Targets are processed one at a time. Scanning, normalization, anchor
+collection, and profile alignment use the available Julia threads inside each
+target. This bounds per-target working memory and removes nested execution
+policies.
 
 ### Running
 
 ```bash
-# One Julia thread (both ThreadedExecution policies are effectively serial)
+# One Julia thread (ThreadedExecution is effectively serial)
 JULIA_NUM_THREADS=1 julia --project=Mimosa.jl/benchmark Mimosa.jl/benchmark/bench_1v50.jl
 
 # Meaningful strategy comparison with four Julia threads
@@ -220,10 +220,9 @@ selection and are not comparable with the current benchmark.
    completes in ~14 ms. Precomputing all 50 target profiles (scan + profile
    build) takes ~920 ms total (~18 ms/model).
 
-4. The historical ~1.1× result did not exercise `ThreadedExecution`. Current
-   one-to-many measurements pass `outer_execution=ThreadedExecution(n)`;
-   isolated scans use `scan_execution=ThreadedExecution(n)`. Both policies and
-   `Threads.nthreads()` are recorded.
+4. The historical ~1.1× result did not exercise the current kernel-level
+   `ThreadedExecution`. Current one-to-many measurements use a single
+   `execution=ThreadedExecution(n)` policy and record `Threads.nthreads()`.
 
 5. **No scaling advantage from batching.** The 1-vs-50 time is exactly 50× the
    1-vs-1 time (speedup = 1.0×), confirming that each target is processed

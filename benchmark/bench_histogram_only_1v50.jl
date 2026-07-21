@@ -44,7 +44,7 @@ end
 function fit_histogram_only(
     strategy::HistogramOnlyEmpiricalLogTail,
     scores::AbstractVector{T};
-    scan_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
 ) where {T<:Real}
     values = Float32.(scores)
     all(isfinite, values) || throw(ArgumentError("normalization scores must be finite"))
@@ -53,13 +53,15 @@ function fit_histogram_only(
 
     minimum_score, maximum_score = extrema(values)
     bins = minimum_score == maximum_score ? 1 : strategy.bins
-    bin_width = minimum_score == maximum_score ?
-                0.0f0 : (maximum_score - minimum_score) / Float32(bins)
-    nchunks = scan_execution isa ThreadedExecution ?
-              Mimosa._effective_ntasks(scan_execution, n) : 1
+    bin_width = if minimum_score == maximum_score
+        0.0f0
+    else
+        (maximum_score - minimum_score) / Float32(bins)
+    end
+    nchunks = execution isa ThreadedExecution ? Mimosa._effective_ntasks(execution, n) : 1
     counts = zeros(UInt32, bins, nchunks)
 
-    Mimosa._parallel_for(scan_execution, nchunks) do chunk
+    Mimosa._parallel_for(execution, nchunks) do chunk
         first_index = fld((chunk - 1) * n, nchunks) + 1
         last_index = fld(chunk * n, nchunks)
         @inbounds for index in first_index:last_index
@@ -82,13 +84,13 @@ end
 function transform_histogram_only(
     table::HistogramOnlyLogTailTable,
     scores::RaggedArray{Float32};
-    scan_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
 )
     n = length(scores.data)
     output = Vector{Float32}(undef, n)
-    nchunks = scan_execution isa ThreadedExecution ?
-              Mimosa._effective_ntasks(scan_execution, max(n, 1)) : 1
-    Mimosa._parallel_for(scan_execution, nchunks) do chunk
+    nchunks =
+        execution isa ThreadedExecution ? Mimosa._effective_ntasks(execution, max(n, 1)) : 1
+    Mimosa._parallel_for(execution, nchunks) do chunk
         first_index = fld((chunk - 1) * n, nchunks) + 1
         last_index = fld(chunk * n, nchunks)
         @inbounds for index in first_index:last_index
@@ -104,15 +106,11 @@ end
 function normalize_histogram_only(
     table::HistogramOnlyLogTailTable,
     bundle::StrandPair{<:RaggedArray{Float32}};
-    scan_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
 )
-    forward = transform_histogram_only(
-        table, bundle.forward; scan_execution=scan_execution
-    )
+    forward = transform_histogram_only(table, bundle.forward; execution=execution)
     bundle.forward === bundle.reverse && return StrandPair(forward, forward)
-    reverse = transform_histogram_only(
-        table, bundle.reverse; scan_execution=scan_execution
-    )
+    reverse = transform_histogram_only(table, bundle.reverse; execution=execution)
     return StrandPair(forward, reverse)
 end
 
@@ -121,24 +119,21 @@ function Mimosa._fit_normalize(
     raw::StrandPair{<:RaggedArray{Float32}};
     calibration::StrandPair{<:RaggedArray{Float32}}=raw,
     tail_logfpr::Real=0.0,
-    scan_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
 )
     isfinite(tail_logfpr) && tail_logfpr >= 0 ||
         throw(ArgumentError("tail_logfpr must be finite and non-negative"))
     table = fit_histogram_only(
-        strategy,
-        Mimosa._empirical_workspace(calibration);
-        scan_execution=scan_execution,
+        strategy, Mimosa._empirical_workspace(calibration); execution=execution
     )
-    normalized = normalize_histogram_only(
-        table, raw; scan_execution=scan_execution
-    )
+    normalized = normalize_histogram_only(table, raw; execution=execution)
     return table, normalized
 end
 
 function detailed_differences(exact_results, approximate_results)
     base = compare_outputs(exact_results, approximate_results)
-    signed = getproperty.(approximate_results, :score) .- getproperty.(exact_results, :score)
+    signed =
+        getproperty.(approximate_results, :score) .- getproperty.(exact_results, :score)
     absolute = sort(abs.(signed))
     site_deltas = abs.(
         getproperty.(approximate_results, :n_sites) .- getproperty.(exact_results, :n_sites)
@@ -201,24 +196,13 @@ end
 function main_histogram_only()
     histogram_bins = parse_histogram_bins()
     threaded = ThreadedExecution()
-    exact_case = BenchmarkCase(
-        "Exact target-threaded",
-        Mimosa.EmpiricalLogTail(),
-        threaded,
-        SerialExecution(),
-    )
+    exact_case = BenchmarkCase("Exact inner-threaded", Mimosa.EmpiricalLogTail(), threaded)
     hybrid_case = BenchmarkCase(
-        "Hybrid exact-tail",
-        HybridEmpiricalLogTail(HYBRID_BINS),
-        SerialExecution(),
-        threaded,
+        "Hybrid exact-tail", HybridEmpiricalLogTail(HYBRID_BINS), threaded
     )
     histogram_cases = [
         BenchmarkCase(
-            "Histogram-only $bins bins",
-            HistogramOnlyEmpiricalLogTail(bins),
-            SerialExecution(),
-            threaded,
+            "Histogram-only $bins bins", HistogramOnlyEmpiricalLogTail(bins), threaded
         ) for bins in histogram_bins
     ]
 
@@ -236,45 +220,30 @@ function main_histogram_only()
     println("=" ^ 108)
 
     sequences = make_random_sequences(N_SEQUENCES, SEQ_LENGTH; seed=SEED)
-    background = make_random_sequences(
-        N_BACKGROUND, BACKGROUND_LENGTH; seed=SEED + 1
-    )
+    background = make_random_sequences(N_BACKGROUND, BACKGROUND_LENGTH; seed=SEED + 1)
     query_model = make_pwm(PWM_WIDTH, SEED)
     target_models = [make_pwm(PWM_WIDTH, SEED + 100 + index) for index in 1:N_TARGETS]
 
     exact = benchmark_case(
-        exact_case,
-        query_model,
-        target_models,
-        sequences,
-        N_REPS;
-        background=background,
+        exact_case, query_model, target_models, sequences, N_REPS; background=background
     )
     hybrid = benchmark_case(
-        hybrid_case,
-        query_model,
-        target_models,
-        sequences,
-        N_REPS;
-        background=background,
+        hybrid_case, query_model, target_models, sequences, N_REPS; background=background
     )
     histogram_results = [
         benchmark_case(
-            case,
-            query_model,
-            target_models,
-            sequences,
-            N_REPS;
-            background=background,
-        ) for
-        case in histogram_cases
+            case, query_model, target_models, sequences, N_REPS; background=background
+        ) for case in histogram_cases
     ]
 
     exact_ns = Float64(exact.many.median_ns)
     println("\n" * "=" ^ 108)
     println("  SUMMARY — speedup and computation differences relative to Exact")
     println("=" ^ 108)
-    println(rpad("Exact target-threaded", 31), @sprintf("%9.3f ms  %6.2fx", exact_ns / 1.0e6, 1.0))
+    println(
+        rpad("Exact inner-threaded", 31),
+        @sprintf("%9.3f ms  %6.2fx", exact_ns / 1.0e6, 1.0)
+    )
     show_summary_row("Hybrid exact-tail", hybrid, exact.results, exact_ns)
     for (case, result) in zip(histogram_cases, histogram_results)
         show_summary_row(case.label, result, exact.results, exact_ns)

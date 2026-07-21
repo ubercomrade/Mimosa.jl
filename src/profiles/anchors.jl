@@ -133,3 +133,69 @@ function collect_anchors(scores::RaggedArray{Float32}, threshold::Float32)
         return collect_best_anchors(scores)
     end
 end
+
+"""
+    collect_anchor_csr(scores, threshold; execution=SerialExecution())
+
+Collect anchors directly into deterministic CSR storage. Row counting and
+position collection are parallelized independently; the prefix sum preserves
+the serial row and position order.
+"""
+function collect_anchor_csr(
+    scores::RaggedArray{Float32},
+    threshold::Float32;
+    execution::ExecutionPolicy=SerialExecution(),
+)
+    n = nrows(scores)
+    costs = diff(scores.offsets)
+    counts = zeros(Int, n)
+    if threshold > 0.0f0
+        _parallel_for_weighted(execution, costs) do row_index
+            count = 0
+            @inbounds for score in row(scores, row_index)
+                count += score >= threshold
+            end
+            return counts[row_index] = count
+        end
+    else
+        _parallel_for_weighted(execution, costs) do row_index
+            return counts[row_index] = rowlength(scores, row_index) > 0
+        end
+    end
+
+    offsets = Vector{Int}(undef, n + 1)
+    offsets[1] = 1
+    @inbounds for row_index in 1:n
+        offsets[row_index + 1] = offsets[row_index] + counts[row_index]
+    end
+    positions = Vector{Int}(undef, offsets[end] - 1)
+
+    if threshold > 0.0f0
+        _parallel_for_weighted(execution, costs) do row_index
+            destination = offsets[row_index]
+            @inbounds for (position, score) in pairs(row(scores, row_index))
+                if score >= threshold
+                    positions[destination] = position
+                    destination += 1
+                end
+            end
+        end
+    else
+        _parallel_for_weighted(execution, costs) do row_index
+            length = rowlength(scores, row_index)
+            length == 0 && return nothing
+            scores_row = row(scores, row_index)
+            best_position = 1
+            best_score = scores_row[1]
+            @inbounds for position in 2:length
+                if scores_row[position] > best_score
+                    best_score = scores_row[position]
+                    best_position = position
+                end
+            end
+            positions[offsets[row_index]] = best_position
+            return nothing
+        end
+    end
+    return AnchorCSR(positions, offsets)
+end

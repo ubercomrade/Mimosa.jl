@@ -1,15 +1,13 @@
-# Execution policies for top-level parallelism.
+# Execution policies for computational kernels.
 #
-# Parallelism in Mimosa is applied at the *top independent level* — sequences,
-# target models, or comparison pairs — never inside inner scanning kernels.
-# The kernels themselves are serial and composable. This keeps results
-# deterministic regardless of thread count.
+# Targets and comparison pairs remain serial. Parallelism is applied inside
+# independent computational kernels such as sequence scanning, normalization,
+# anchor collection, and profile alignment.
 #
 # Design per ADR 0004 (parallelism-and-rng):
 #   - `SerialExecution` processes items in order.
 #   - `ThreadedExecution(ntasks)` uses at most `ntasks` worker tasks and never
 #     exceeds the number of Julia threads available to the process.
-#   - Nested calls execute serially inside an existing parallel worker.
 
 """
     ExecutionPolicy
@@ -83,40 +81,12 @@ slots indexed by `i`.
 """
 function _parallel_for end
 
-const _PARALLEL_DEPTH_KEY = gensym(:mimosa_parallel_depth)
-
 function _effective_ntasks(pol::ThreadedExecution, n::Int)
     return min(pol.ntasks, n, max(1, Threads.nthreads()))
 end
 
-_is_effectively_threaded(::SerialExecution) = false
-_is_effectively_threaded(pol::ThreadedExecution) = min(pol.ntasks, Threads.nthreads()) > 1
-
-function _validate_execution_levels(
-    outer_execution::ExecutionPolicy, scan_execution::ExecutionPolicy
-)
-    _is_effectively_threaded(outer_execution) && _is_effectively_threaded(scan_execution) &&
-        throw(ArgumentError("outer_execution and scan_execution cannot both use multiple threads."))
-    return nothing
-end
-
-function _in_parallel_region()
-    return get(task_local_storage(), _PARALLEL_DEPTH_KEY, 0) > 0
-end
-
-function _with_parallel_region(f)
-    tls = task_local_storage()
-    previous = get(tls, _PARALLEL_DEPTH_KEY, 0)
-    tls[_PARALLEL_DEPTH_KEY] = previous + 1
-    try
-        return f()
-    finally
-        if previous == 0
-            delete!(tls, _PARALLEL_DEPTH_KEY)
-        else
-            tls[_PARALLEL_DEPTH_KEY] = previous
-        end
-    end
+@inline function _chunk_bounds(n::Int, chunk::Int, nchunks::Int)
+    return (fld((chunk - 1) * n, nchunks) + 1, fld(chunk * n, nchunks))
 end
 
 function _parallel_for(f!, ::SerialExecution, n::Int)
@@ -128,7 +98,6 @@ end
 
 function _parallel_for(f!, pol::ThreadedExecution, n::Int)
     n <= 0 && return nothing
-    _in_parallel_region() && return _parallel_for(f!, SerialExecution(), n)
 
     ntasks = _effective_ntasks(pol, n)
     ntasks <= 1 && return _parallel_for(f!, SerialExecution(), n)
@@ -137,12 +106,10 @@ function _parallel_for(f!, pol::ThreadedExecution, n::Int)
     next_index = Threads.Atomic{Int}(1)
     @sync for t in 1:ntasks
         Threads.@spawn begin
-            _with_parallel_region() do
-                while true
-                    i = Threads.atomic_add!(next_index, 1)
-                    i > n && break
-                    f!(i)
-                end
+            while true
+                i = Threads.atomic_add!(next_index, 1)
+                i > n && break
+                f!(i)
             end
         end
     end
@@ -166,8 +133,6 @@ function _parallel_for_weighted(
 )
     n = length(costs)
     n == 0 && return nothing
-    _in_parallel_region() && return _parallel_for(f!, SerialExecution(), n)
-
     ntasks = _effective_ntasks(pol, n)
     ntasks <= 1 && return _parallel_for(f!, SerialExecution(), n)
 

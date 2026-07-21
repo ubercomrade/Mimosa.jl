@@ -44,7 +44,7 @@ const ALGORITHM_VERSIONS = Dict{String,String}(
 # sessions that use the same Mimosa cache format.
 const PREPARED_PROFILE_CACHE_FORMAT_VERSION = 2
 const _PREPARED_PROFILE_CACHE_MAGIC = UInt8[
-    0x4d, 0x49, 0x4d, 0x4f, 0x53, 0x41, 0x2d, 0x50, 0x52, 0x45, 0x50, 0x2d, 0x31,
+    0x4d, 0x49, 0x4d, 0x4f, 0x53, 0x41, 0x2d, 0x50, 0x52, 0x45, 0x50, 0x2d, 0x31
 ]
 
 # ── Cache type ──────────────────────────────────────────────────────────────
@@ -299,16 +299,24 @@ function prepared_profile_cache_key(
     normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
 )
     is_motif = source isa AbstractMotifModel
-    is_motif && sequences === nothing && throw(
-        ArgumentError("motif prepared-profile cache keys require comparison sequences.")
-    )
+    is_motif &&
+        sequences === nothing &&
+        throw(
+            ArgumentError("motif prepared-profile cache keys require comparison sequences.")
+        )
     is_motif && validate_model(source; capability=:cache)
     source_fingerprint = model_fingerprint(source)
-    sequence_part = sequences === nothing ? "sequences=none" : "sequences=$(sequence_fingerprint(sequences))"
+    sequence_part = if sequences === nothing
+        "sequences=none"
+    else
+        "sequences=$(sequence_fingerprint(sequences))"
+    end
     effective_background = is_motif && background === nothing ? sequences : background
-    background_part =
-        effective_background === nothing ?
-        "background=none" : "background=$(sequence_fingerprint(effective_background))"
+    background_part = if effective_background === nothing
+        "background=none"
+    else
+        "background=$(sequence_fingerprint(effective_background))"
+    end
     threshold = Float32(min_logfpr)
     isfinite(threshold) || throw(ArgumentError("min_logfpr must be finite."))
     return cache_key(
@@ -323,14 +331,25 @@ function prepared_profile_cache_key(
 end
 
 function _cached_prepared_profile(
-    cache::Union{Nothing,Cache},
+    ::Nothing,
     source::AbstractProfileSource,
     sequences::Union{Nothing,EncodedSequenceBatch},
     background::Union{Nothing,EncodedSequenceBatch},
     threshold::Float32,
     normalization::AbstractNormalizationStrategy,
 )
-    (cache === nothing || !cache.enabled) && return (nothing, nothing)
+    return (nothing, nothing)
+end
+
+function _cached_prepared_profile(
+    cache::Cache,
+    source::AbstractProfileSource,
+    sequences::Union{Nothing,EncodedSequenceBatch},
+    background::Union{Nothing,EncodedSequenceBatch},
+    threshold::Float32,
+    normalization::AbstractNormalizationStrategy,
+)
+    !cache.enabled && return (nothing, nothing)
     key = prepared_profile_cache_key(
         cache, source, sequences; background=background, min_logfpr=threshold, normalization
     )
@@ -340,9 +359,15 @@ function _cached_prepared_profile(
 end
 
 function _store_prepared_profile!(
-    cache::Union{Nothing,Cache}, key::Union{Nothing,String}, profile::PreparedProfile
+    ::Nothing, key::Union{Nothing,String}, profile::PreparedProfile
 )
-    (cache === nothing || !cache.enabled || key === nothing) && return profile
+    return profile
+end
+
+function _store_prepared_profile!(
+    cache::Cache, key::Union{Nothing,String}, profile::PreparedProfile
+)
+    (!cache.enabled || key === nothing) && return profile
     cache_set(
         cache,
         key,
@@ -373,26 +398,32 @@ end
 function _decode_prepared_profile(data::AbstractVector{UInt8})
     try
         io = IOBuffer(data)
-        read(io, UInt8, length(_PREPARED_PROFILE_CACHE_MAGIC)) == _PREPARED_PROFILE_CACHE_MAGIC ||
-            return nothing
+        read(io, UInt8, length(_PREPARED_PROFILE_CACHE_MAGIC)) ==
+        _PREPARED_PROFILE_CACHE_MAGIC || return nothing
         _read_cache_u64(io) == PREPARED_PROFILE_CACHE_FORMAT_VERSION || return nothing
         name = _read_cache_string(io)
         threshold = _read_cache_f32(io)
         isfinite(threshold) || return nothing
         normalization_tag = _read_cache_string(io)
-        normalization = if normalization_tag == normalization_fingerprint(EmpiricalLogTail())
-            EmpiricalLogTail()
-        elseif startswith(normalization_tag, "hybrid-log-tail-v2;")
-            fields = Dict(split(part, "=", limit=2) for part in split(normalization_tag, ";")[2:end])
-            HybridEmpiricalLogTail(parse(Int, fields["bins"]))
-        else
-            return nothing
-        end
+        normalization =
+            if normalization_tag == normalization_fingerprint(EmpiricalLogTail())
+                EmpiricalLogTail()
+            elseif startswith(normalization_tag, "hybrid-log-tail-v2;")
+                fields = Dict(
+                    split(part, "="; limit=2) for
+                    part in split(normalization_tag, ";")[2:end]
+                )
+                HybridEmpiricalLogTail(parse(Int, fields["bins"]))
+            else
+                return nothing
+            end
         forward = _read_cache_ragged(io)
         reverse = _read_cache_ragged(io)
         anchors = (_read_cache_anchor_csr(io), _read_cache_anchor_csr(io))
         eof(io) || return nothing
-        return PreparedProfile(name, StrandPair(forward, reverse), anchors, threshold, normalization)
+        return PreparedProfile(
+            name, StrandPair(forward, reverse), anchors, threshold, normalization
+        )
     catch
         # A checksum-valid entry can still be from an unknown or malformed
         # prepared-profile format. Treat it as a normal cache miss.
@@ -441,11 +472,13 @@ end
 
 function _read_cache_int_vector(io::IO)
     count = _read_cache_u64(io)
-    count <= bytesavailable(io) ÷ sizeof(UInt64) || throw(ArgumentError("truncated cached integer vector."))
+    count <= bytesavailable(io) ÷ sizeof(UInt64) ||
+        throw(ArgumentError("truncated cached integer vector."))
     values = Vector{Int}(undef, count)
     for index in eachindex(values)
         value = reinterpret(Int64, ltoh(read(io, UInt64)))
-        typemin(Int) <= value <= typemax(Int) || throw(ArgumentError("cached integer is out of range."))
+        typemin(Int) <= value <= typemax(Int) ||
+            throw(ArgumentError("cached integer is out of range."))
         values[index] = Int(value)
     end
     return values
@@ -462,7 +495,8 @@ end
 
 function _read_cache_ragged(io::IO)
     count = _read_cache_u64(io)
-    count <= bytesavailable(io) ÷ sizeof(UInt32) || throw(ArgumentError("truncated cached score vector."))
+    count <= bytesavailable(io) ÷ sizeof(UInt32) ||
+        throw(ArgumentError("truncated cached score vector."))
     data = Vector{Float32}(undef, count)
     for index in eachindex(data)
         data[index] = _read_cache_f32(io)

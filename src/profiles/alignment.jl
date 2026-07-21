@@ -521,28 +521,45 @@ function _score_orientation_pair_csr(
     window_radius::Int,
     realign_window::Int,
     metric::AbstractProfileMetric,
+    execution::ExecutionPolicy,
 )
     query_scores = query_strand == 1 ? query_bundle.forward : query_bundle.reverse
     target_scores = target_strand == 1 ? target_bundle.forward : target_bundle.reverse
 
+    n_shifts = 2 * search_range + 1
+    scores = Vector{Float32}(undef, n_shifts)
+    site_counts = Vector{Int}(undef, n_shifts)
+    max_len = maximum((rowlength(query_scores, r) for r in 1:nrows(query_scores)); init=0)
+    nchunks = execution isa ThreadedExecution ? _effective_ntasks(execution, n_shifts) : 1
+    scratches = [CandidateScratch(max_len) for _ in 1:nchunks]
+    _parallel_for(execution, nchunks) do chunk
+        first, last = _chunk_bounds(n_shifts, chunk, nchunks)
+        scratch = scratches[chunk]
+        @inbounds for shift_index in first:last
+            shift = shift_index - search_range - 1
+            score, n_sites = _score_shift!(
+                scratch,
+                query_scores,
+                target_scores,
+                query_anchors,
+                target_anchors,
+                shift,
+                window_radius,
+                realign_window,
+                metric,
+            )
+            scores[shift_index] = score
+            site_counts[shift_index] = n_sites
+        end
+    end
+
     best_score = 0.0f0
     best_shift = 0
     best_n_sites = 0
-    max_len = maximum((rowlength(query_scores, r) for r in 1:nrows(query_scores)); init=0)
-    scratch = CandidateScratch(max_len)
-
-    for shift in (-search_range):search_range
-        score, n_sites = _score_shift!(
-            scratch,
-            query_scores,
-            target_scores,
-            query_anchors,
-            target_anchors,
-            shift,
-            window_radius,
-            realign_window,
-            metric,
-        )
+    @inbounds for shift_index in 1:n_shifts
+        shift = shift_index - search_range - 1
+        score = scores[shift_index]
+        n_sites = site_counts[shift_index]
         if Float64(score) > Float64(best_score) || (
             Float64(score) == Float64(best_score) && (
                 n_sites > best_n_sites ||
@@ -571,6 +588,7 @@ function _score_orientation_pair(
     realign_window::Int,
     metric::AbstractProfileMetric,
     min_logfpr::Float32=0.0f0,
+    execution::ExecutionPolicy=SerialExecution(),
 )
     min_logfpr > 0.0f0 && return _score_orientation_pair_csr(
         query_bundle,
@@ -584,14 +602,16 @@ function _score_orientation_pair(
         window_radius,
         realign_window,
         metric,
+        execution,
     )
 
     query_scores = query_strand == 1 ? query_bundle.forward : query_bundle.reverse
     target_scores = target_strand == 1 ? target_bundle.forward : target_bundle.reverse
-    best_score = 0.0f0
-    best_shift = 0
-    best_n_sites = 0
-    for shift in (-search_range):search_range
+    n_shifts = 2 * search_range + 1
+    scores = Vector{Float32}(undef, n_shifts)
+    site_counts = Vector{Int}(undef, n_shifts)
+    _parallel_for(execution, n_shifts) do shift_index
+        shift = shift_index - search_range - 1
         score, n_sites = _score_shift_best!(
             query_scores,
             target_scores,
@@ -602,6 +622,17 @@ function _score_orientation_pair(
             realign_window,
             metric,
         )
+        scores[shift_index] = score
+        return site_counts[shift_index] = n_sites
+    end
+
+    best_score = 0.0f0
+    best_shift = 0
+    best_n_sites = 0
+    @inbounds for shift_index in 1:n_shifts
+        shift = shift_index - search_range - 1
+        score = scores[shift_index]
+        n_sites = site_counts[shift_index]
         if Float64(score) > Float64(best_score) || (
             Float64(score) == Float64(best_score) && (
                 n_sites > best_n_sites ||
@@ -680,7 +711,8 @@ function profile_compare(
     query_anchors::Tuple{AnchorCSR,AnchorCSR},
     target_bundle::StrandPair{<:RaggedArray{Float32}},
     target_anchors::Tuple{AnchorCSR,AnchorCSR},
-    config::ProfileConfig,
+    config::ProfileConfig;
+    execution::ExecutionPolicy=SerialExecution(),
 )
     metric = config.metric
 
@@ -707,6 +739,7 @@ function profile_compare(
             config.realign_window,
             metric,
             config.min_logfpr,
+            execution,
         )
         score, shift, n_sites, _ = result
 
@@ -749,13 +782,14 @@ orientation priority `++ > +- > -+ > --`.
 function profile_compare(
     query_bundle::StrandPair{<:RaggedArray{Float32}},
     target_bundle::StrandPair{<:RaggedArray{Float32}},
-    config::ProfileConfig,
+    config::ProfileConfig;
+    execution::ExecutionPolicy=SerialExecution(),
 )
     threshold = config.min_logfpr
-    query_anchors = _collect_both_anchors(query_bundle, threshold)
-    target_anchors = _collect_both_anchors(target_bundle, threshold)
+    query_anchors = _collect_both_anchors(query_bundle, threshold, execution)
+    target_anchors = _collect_both_anchors(target_bundle, threshold, execution)
     return profile_compare(
-        query_bundle, query_anchors, target_bundle, target_anchors, config
+        query_bundle, query_anchors, target_bundle, target_anchors, config; execution
     )
 end
 
@@ -814,7 +848,9 @@ function PreparedProfile(
             end
         end
     end
-    return PreparedProfile{typeof(bundle),S}(name, bundle, anchors, threshold, normalization)
+    return PreparedProfile{typeof(bundle),S}(
+        name, bundle, anchors, threshold, normalization
+    )
 end
 
 function PreparedProfile(
@@ -832,16 +868,15 @@ end
 Collect anchors for both strands and return `(forward_csr, reverse_csr)`.
 """
 function _collect_both_anchors(
-    bundle::StrandPair{<:RaggedArray{Float32}}, threshold::Float32
+    bundle::StrandPair{<:RaggedArray{Float32}},
+    threshold::Float32,
+    execution::ExecutionPolicy=SerialExecution(),
 )
-    n_rows = nrows(bundle.forward)
-    fwd_rows, fwd_pos = collect_anchors(bundle.forward, threshold)
-    fwd_csr = build_anchor_csr(fwd_rows, fwd_pos, n_rows)
+    fwd_csr = collect_anchor_csr(bundle.forward, threshold; execution)
     if bundle.forward === bundle.reverse
         return (fwd_csr, fwd_csr)
     end
-    rev_rows, rev_pos = collect_anchors(bundle.reverse, threshold)
-    return (fwd_csr, build_anchor_csr(rev_rows, rev_pos, n_rows))
+    return (fwd_csr, collect_anchor_csr(bundle.reverse, threshold; execution))
 end
 
 """
@@ -858,17 +893,23 @@ function prepare_profile(
     model::ScoreProfile;
     min_logfpr::Real=0.0,
     normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
-    scan_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
     threshold = Float32(min_logfpr)
     isfinite(threshold) || throw(ArgumentError("min_logfpr must be finite."))
-    key, cached = _cached_prepared_profile(cache, model, nothing, nothing, threshold, normalization)
+    key, cached = _cached_prepared_profile(
+        cache, model, nothing, nothing, threshold, normalization
+    )
     cached !== nothing && return cached
     raw = StrandPair(model.scores, model.scores)
-    _, norm_bundle = _fit_normalize(normalization, raw; tail_logfpr=threshold, scan_execution=scan_execution)
-    anchors = _collect_both_anchors(norm_bundle, threshold)
-    prepared = PreparedProfile(String(modelname(model)), norm_bundle, anchors, threshold, normalization)
+    _, norm_bundle = _fit_normalize(
+        normalization, raw; tail_logfpr=threshold, execution=execution
+    )
+    anchors = _collect_both_anchors(norm_bundle, threshold, execution)
+    prepared = PreparedProfile(
+        String(modelname(model)), norm_bundle, anchors, threshold, normalization
+    )
     return _store_prepared_profile!(cache, key, prepared)
 end
 
@@ -888,23 +929,27 @@ function prepare_profile(
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     min_logfpr::Real=0.0,
     normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
-    scan_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
     threshold = Float32(min_logfpr)
     isfinite(threshold) || throw(ArgumentError("min_logfpr must be finite."))
     validate_model(model; capability=:compare)
-    key, cached = _cached_prepared_profile(cache, model, sequences, background, threshold, normalization)
+    key, cached = _cached_prepared_profile(
+        cache, model, sequences, background, threshold, normalization
+    )
     cached !== nothing && return cached
-    raw = _scan_model_batch(model, sequences; strands=BothStrands(), execution=scan_execution)
+    raw = _scan_model_batch(model, sequences; strands=BothStrands(), execution=execution)
     bg = background === nothing ? sequences : background
     norm_bundle = if bg === sequences
-        last(_fit_normalize(normalization, raw; tail_logfpr=threshold, scan_execution=scan_execution))
+        last(_fit_normalize(normalization, raw; tail_logfpr=threshold, execution=execution))
     else
-        _normalize_against_background(model, raw, bg, scan_execution, normalization, threshold)
+        _normalize_against_background(model, raw, bg, execution, normalization, threshold)
     end
-    anchors = _collect_both_anchors(norm_bundle, threshold)
-    prepared = PreparedProfile(String(modelname(model)), norm_bundle, anchors, threshold, normalization)
+    anchors = _collect_both_anchors(norm_bundle, threshold, execution)
+    prepared = PreparedProfile(
+        String(modelname(model)), norm_bundle, anchors, threshold, normalization
+    )
     return _store_prepared_profile!(cache, key, prepared)
 end
 
@@ -914,12 +959,18 @@ function _normalize_against_background(
     model::AbstractMotifModel,
     raw::StrandPair{<:RaggedArray{Float32}},
     background::EncodedSequenceBatch,
-    scan_execution::ExecutionPolicy,
+    execution::ExecutionPolicy,
     normalization::AbstractNormalizationStrategy,
     tail_logfpr::Float32,
 )
-    bg_raw = _scan_model_batch(model, background; strands=BothStrands(), execution=scan_execution)
-    return last(_fit_normalize(normalization, raw; calibration=bg_raw, tail_logfpr, scan_execution=scan_execution))
+    bg_raw = _scan_model_batch(
+        model, background; strands=BothStrands(), execution=execution
+    )
+    return last(
+        _fit_normalize(
+            normalization, raw; calibration=bg_raw, tail_logfpr, execution=execution
+        ),
+    )
 end
 
 # ── PreparedProfile compare methods ────────────────────────────────────────────
@@ -945,13 +996,16 @@ function compare(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
+    execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)
     threshold = min_logfpr === nothing ? query.min_logfpr : Float32(min_logfpr)
     threshold == query.min_logfpr ||
         throw(ArgumentError("min_logfpr differs from the prepared query threshold."))
-    prepared_target = prepare_profile(target; min_logfpr=threshold, normalization=query.normalization, cache=cache)
+    prepared_target = prepare_profile(
+        target; min_logfpr=threshold, normalization=query.normalization, execution, cache
+    )
     config = ProfileConfig(;
         metric=m,
         search_range=search_range,
@@ -960,7 +1014,12 @@ function compare(
         min_logfpr=threshold,
     )
     score, shift, orientation, n_sites, metric_str = profile_compare(
-        query.bundle, query.anchors, prepared_target.bundle, prepared_target.anchors, config
+        query.bundle,
+        query.anchors,
+        prepared_target.bundle,
+        prepared_target.anchors,
+        config;
+        execution,
     )
     return ComparisonResult(
         modelname(query), modelname(target), score, shift, orientation, metric_str, n_sites
@@ -974,6 +1033,7 @@ function compare(
     search_range::Int=10,
     window_radius::Int=10,
     realign_window::Int=3,
+    execution::ExecutionPolicy=SerialExecution(),
 )
     query.min_logfpr == target.min_logfpr ||
         throw(ArgumentError("prepared profiles use different min_logfpr thresholds."))
@@ -987,7 +1047,7 @@ function compare(
         min_logfpr=query.min_logfpr,
     )
     score, shift, orientation, n_sites, metric_str = profile_compare(
-        query.bundle, query.anchors, target.bundle, target.anchors, config
+        query.bundle, query.anchors, target.bundle, target.anchors, config; execution
     )
     return ComparisonResult(
         modelname(query), modelname(target), score, shift, orientation, metric_str, n_sites
@@ -1006,12 +1066,11 @@ Each target is prepared (normalized, anchors collected) independently.
 function compare(
     query::PreparedProfile,
     targets::AbstractVector{<:ScoreProfile};
-    outer_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
     metric::Union{AbstractString,Symbol,AbstractProfileMetric}=:co,
     search_range::Int=10,
     window_radius::Int=10,
     realign_window::Int=3,
-    normalization::Union{Nothing,AbstractNormalizationStrategy}=nothing,
     min_logfpr::Union{Nothing,Real}=nothing,
     cache=nothing,
 )
@@ -1024,15 +1083,24 @@ function compare(
     )
     results = Vector{ComparisonResult}(undef, length(targets))
     isempty(targets) && return results
-    _parallel_for(outer_execution, length(targets)) do i
+    for i in eachindex(targets)
         target = targets[i]
-        strategy = normalization === nothing ? query.normalization : normalization
-        strategy == query.normalization || throw(ArgumentError("normalization differs from the prepared query strategy."))
-        prepared_target = prepare_profile(target; min_logfpr=threshold, normalization=strategy, cache=cache)
-        score, shift, orientation, n_sites, metric_str = profile_compare(
-            query.bundle, query.anchors, prepared_target.bundle, prepared_target.anchors, config
+        prepared_target = prepare_profile(
+            target;
+            min_logfpr=threshold,
+            normalization=query.normalization,
+            execution,
+            cache,
         )
-        return results[i] = ComparisonResult(
+        score, shift, orientation, n_sites, metric_str = profile_compare(
+            query.bundle,
+            query.anchors,
+            prepared_target.bundle,
+            prepared_target.anchors,
+            config;
+            execution,
+        )
+        results[i] = ComparisonResult(
             modelname(query),
             modelname(target),
             score,
@@ -1048,12 +1116,11 @@ end
 function compare(
     query::PreparedProfile,
     targets::AbstractVector{<:PreparedProfile};
-    outer_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
     metric::Union{AbstractString,Symbol,AbstractProfileMetric}=:co,
     search_range::Int=10,
     window_radius::Int=10,
     realign_window::Int=3,
-    normalization::Union{Nothing,AbstractNormalizationStrategy}=nothing,
 )
     config = ProfileConfig(;
         metric=_resolve_profile_metric(metric),
@@ -1064,16 +1131,17 @@ function compare(
     )
     results = Vector{ComparisonResult}(undef, length(targets))
     isempty(targets) && return results
-    _parallel_for(outer_execution, length(targets)) do i
+    for i in eachindex(targets)
         target = targets[i]
         query.min_logfpr == target.min_logfpr ||
             throw(ArgumentError("prepared profiles use different min_logfpr thresholds."))
-        query.normalization == target.normalization ||
-            throw(ArgumentError("prepared profiles use different normalization strategies."))
-        score, shift, orientation, n_sites, metric_str = profile_compare(
-            query.bundle, query.anchors, target.bundle, target.anchors, config
+        query.normalization == target.normalization || throw(
+            ArgumentError("prepared profiles use different normalization strategies.")
         )
-        return results[i] = ComparisonResult(
+        score, shift, orientation, n_sites, metric_str = profile_compare(
+            query.bundle, query.anchors, target.bundle, target.anchors, config; execution
+        )
+        results[i] = ComparisonResult(
             modelname(query),
             modelname(target),
             score,
@@ -1089,7 +1157,7 @@ end
 """
     compare(query::PreparedProfile, target::AbstractMotifModel,
             sequences::EncodedSequenceBatch; metric=:co,
-            scan_execution=SerialExecution(), kwargs...)
+            execution=SerialExecution(), kwargs...)
 
 Compare a [`PreparedProfile`](@ref) against a motif model target by scanning
 the target against `sequences` and comparing profiles. The query's normalized
@@ -1105,8 +1173,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
-    normalization::Union{Nothing,AbstractNormalizationStrategy}=nothing,
-    scan_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)
@@ -1114,11 +1181,12 @@ function compare(
     threshold == query.min_logfpr ||
         throw(ArgumentError("min_logfpr differs from the prepared query threshold."))
     prepared_target = prepare_profile(
-        target, sequences;
+        target,
+        sequences;
         background=background,
         normalization=query.normalization,
         min_logfpr=threshold,
-        scan_execution=scan_execution,
+        execution=execution,
         cache=cache,
     )
     config = ProfileConfig(;
@@ -1129,7 +1197,12 @@ function compare(
         min_logfpr=threshold,
     )
     score, shift, orientation, n_sites, metric_str = profile_compare(
-        query.bundle, query.anchors, prepared_target.bundle, prepared_target.anchors, config
+        query.bundle,
+        query.anchors,
+        prepared_target.bundle,
+        prepared_target.anchors,
+        config;
+        execution,
     )
     return ComparisonResult(
         modelname(query), modelname(target), score, shift, orientation, metric_str, n_sites
@@ -1139,7 +1212,7 @@ end
 """
     compare(query::AbstractMotifModel, target::PreparedProfile,
             sequences::EncodedSequenceBatch; metric=:co,
-            scan_execution=SerialExecution(), kwargs...)
+            execution=SerialExecution(), kwargs...)
 
 Compare a motif model query (scanned against `sequences`) against a
 [`PreparedProfile`](@ref) target. The target's normalized bundle and anchors
@@ -1155,8 +1228,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
-    normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
-    scan_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)
@@ -1164,10 +1236,12 @@ function compare(
     threshold == target.min_logfpr ||
         throw(ArgumentError("min_logfpr differs from the prepared target threshold."))
     prepared_query = prepare_profile(
-        query, sequences;
+        query,
+        sequences;
         background=background,
         min_logfpr=threshold,
-        scan_execution=scan_execution,
+        normalization=target.normalization,
+        execution=execution,
         cache=cache,
     )
     config = ProfileConfig(;
@@ -1178,7 +1252,12 @@ function compare(
         min_logfpr=threshold,
     )
     score, shift, orientation, n_sites, metric_str = profile_compare(
-        prepared_query.bundle, prepared_query.anchors, target.bundle, target.anchors, config
+        prepared_query.bundle,
+        prepared_query.anchors,
+        target.bundle,
+        target.anchors,
+        config;
+        execution,
     )
     return ComparisonResult(
         modelname(query), modelname(target), score, shift, orientation, metric_str, n_sites
@@ -1186,27 +1265,24 @@ function compare(
 end
 
 """
-    compare(query::PreparedProfile, targets, sequences; outer_execution=...)
+    compare(query::PreparedProfile, targets, sequences; execution=...)
 
-Compare one prepared query against motif-model targets. Each target owns a
-serial scan, normalization, anchor collection, and alignment path.
+Compare one prepared query against motif-model targets. Targets retain stable
+serial order while each target uses `execution` inside computational kernels.
 """
 function compare(
     query::PreparedProfile,
     targets::AbstractVector{<:AbstractMotifModel},
     sequences::EncodedSequenceBatch;
-    outer_execution::ExecutionPolicy=SerialExecution(),
-    scan_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
     metric::Union{AbstractString,Symbol,AbstractProfileMetric}=:co,
     search_range::Int=10,
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
-    normalization::Union{Nothing,AbstractNormalizationStrategy}=nothing,
     cache=nothing,
 )
-    _validate_execution_levels(outer_execution, scan_execution)
     threshold = min_logfpr === nothing ? query.min_logfpr : Float32(min_logfpr)
     threshold == query.min_logfpr ||
         throw(ArgumentError("min_logfpr differs from the prepared query threshold."))
@@ -1219,20 +1295,26 @@ function compare(
     )
     results = Vector{ComparisonResult}(undef, length(targets))
     isempty(targets) && return results
-    _parallel_for(outer_execution, length(targets)) do i
+    for i in eachindex(targets)
         target = targets[i]
         prepared_target = prepare_profile(
-            target, sequences;
+            target,
+            sequences;
             background=background,
             min_logfpr=threshold,
             normalization=query.normalization,
-            scan_execution=scan_execution,
+            execution=execution,
             cache=cache,
         )
         score, shift, orientation, n_sites, metric_str = profile_compare(
-            query.bundle, query.anchors, prepared_target.bundle, prepared_target.anchors, config
+            query.bundle,
+            query.anchors,
+            prepared_target.bundle,
+            prepared_target.anchors,
+            config;
+            execution,
         )
-        return results[i] = ComparisonResult(
+        results[i] = ComparisonResult(
             modelname(query),
             modelname(target),
             score,
@@ -1246,17 +1328,16 @@ function compare(
 end
 
 """
-    compare(query_model, targets, sequences; outer_execution=...)
+    compare(query_model, targets, sequences; execution=...)
 
-Prepare the query once, then compare it against motif-model targets at the
-outer target level. Inner target work is explicitly serial.
+Prepare the query once, then compare it against motif-model targets in stable
+order while parallelizing the computational kernels of each profile.
 """
 function compare(
     query::AbstractMotifModel,
     targets::AbstractVector{<:AbstractMotifModel},
     sequences::EncodedSequenceBatch;
-    outer_execution::ExecutionPolicy=SerialExecution(),
-    scan_execution::ExecutionPolicy=SerialExecution(),
+    execution::ExecutionPolicy=SerialExecution(),
     metric::Union{AbstractString,Symbol,AbstractProfileMetric}=:co,
     search_range::Int=10,
     window_radius::Int=10,
@@ -1266,22 +1347,19 @@ function compare(
     normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
     cache=nothing,
 )
-    _validate_execution_levels(outer_execution, scan_execution)
     prepared_query = prepare_profile(
-        query, sequences; background, min_logfpr, normalization, scan_execution, cache
+        query, sequences; background, min_logfpr, normalization, execution, cache
     )
     return compare(
         prepared_query,
         targets,
         sequences;
-        outer_execution,
-        scan_execution,
+        execution,
         metric,
         search_range,
         window_radius,
         realign_window,
         background,
-        normalization,
         cache,
     )
 end

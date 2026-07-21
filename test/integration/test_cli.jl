@@ -71,26 +71,11 @@ end
 @testset "CLI normalization selection is not exposed" begin
     query = joinpath(EXAMPLES, "scores_1.fasta")
     target = joinpath(EXAMPLES, "scores_2.fasta")
-    base = [
-        "profile",
-        query,
-        target,
-        "--model1-type",
-        "scores",
-        "--model2-type",
-        "scores",
-    ]
+    base = ["profile", query, target, "--model1-type", "scores", "--model2-type", "scores"]
     @test Mimosa.main(vcat(base, ["--normalization", "exact"])) == 1
     @test Mimosa.main(vcat(base, ["--normalization-bins", "4096"])) == 1
 
-    build_null_base = [
-        "build-null",
-        "motifs",
-        "--model-type",
-        "pwm",
-        "--output",
-        "null",
-    ]
+    build_null_base = ["build-null", "motifs", "--model-type", "pwm", "--output", "null"]
     @test Mimosa.main(vcat(build_null_base, ["--normalization", "exact"])) == 1
     @test Mimosa.main(vcat(build_null_base, ["--normalization-bins", "4096"])) == 1
 end
@@ -241,7 +226,7 @@ end
     @test isfile(joinpath(output_path, "manifest.toml"))
     distribution = loadnull(output_path)
     @test distribution.contract.normalization_version ==
-          normalization_fingerprint(HybridEmpiricalLogTail())
+        normalization_fingerprint(HybridEmpiricalLogTail())
 
     # Annotation accepts only a bundle built for the executed strategy and metric.
     code = Mimosa.main([
@@ -420,7 +405,7 @@ end
         n_samples=12,
         shuffle=true,
         seed=19,
-        outer_execution=SerialExecution(),
+        execution=SerialExecution(),
     )
     serial_scores = serial_result.distribution.raw_scores
 
@@ -431,7 +416,7 @@ end
             n_samples=12,
             shuffle=true,
             seed=19,
-            outer_execution=ThreadedExecution(nt),
+            execution=ThreadedExecution(nt),
         )
         threaded_scores = threaded_result.distribution.raw_scores
         @test threaded_scores == serial_scores
