@@ -15,6 +15,11 @@
 #   6. 1-vs-50 comparison against raw ScoreProfiles
 #   7. Full end-to-end 1-vs-50 (scan each target + compare, query pre-prepared)
 #   8. Throughput (comparisons/second)
+#
+# Environment overrides for quick smoke runs:
+#   MIMOSA_BENCH_N_SEQUENCES, MIMOSA_BENCH_SEQ_LENGTH,
+#   MIMOSA_BENCH_N_TARGETS, MIMOSA_BENCH_PWM_WIDTH, MIMOSA_BENCH_N_REPS,
+#   MIMOSA_BENCH_SEED.
 
 using Random
 using Printf
@@ -66,17 +71,18 @@ end
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-const SEQ_LENGTH = 100
-const N_SEQUENCES = 10000
-const N_TARGETS = 50
-const PWM_WIDTH = 15
-const N_REPS = 5
-const SEED = 12345
+const SEQ_LENGTH = parse(Int, get(ENV, "MIMOSA_BENCH_SEQ_LENGTH", "100"))
+const N_SEQUENCES = parse(Int, get(ENV, "MIMOSA_BENCH_N_SEQUENCES", "10000"))
+const N_TARGETS = parse(Int, get(ENV, "MIMOSA_BENCH_N_TARGETS", "50"))
+const PWM_WIDTH = parse(Int, get(ENV, "MIMOSA_BENCH_PWM_WIDTH", "15"))
+const N_REPS = parse(Int, get(ENV, "MIMOSA_BENCH_N_REPS", "5"))
+const SEED = parse(Int, get(ENV, "MIMOSA_BENCH_SEED", "12345"))
 
 # ── Main benchmark ─────────────────────────────────────────────────────────────
 
 function main()
-    execution = Threads.nthreads() == 1 ? SerialExecution() : ThreadedExecution()
+    scan_execution = Threads.nthreads() == 1 ? SerialExecution() : ThreadedExecution()
+    outer_execution = Threads.nthreads() == 1 ? SerialExecution() : ThreadedExecution()
     println("=" ^ 72)
     println("  Mimosa.jl — 1-vs-50 Profile Comparison Benchmark")
     println("=" ^ 72)
@@ -87,7 +93,8 @@ function main()
     println("  Repetitions       : $N_REPS")
     println("  Seed               : $SEED")
     println("  Julia threads      : $(Threads.nthreads())")
-    println("  Execution policy   : $execution")
+    println("  Scan execution     : $scan_execution")
+    println("  Outer execution    : $outer_execution")
     println("  Date               : $(Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))")
     println("=" ^ 72)
 
@@ -109,12 +116,16 @@ function main()
     println("      Targets: $(N_TARGETS) distinct PWMs (w=$PWM_WIDTH)")
 
     # ── 3. Scan query model against sequences ──────────────────────────────────
-    println("\n[3/8] Scanning query model (BestStrand, 10000 x 100)...")
+    println(
+        "\n[3/8] Scanning query model (BestStrand, $N_SEQUENCES x $SEQ_LENGTH)..."
+    )
     scan_times = bench_repeat(N_REPS) do
-        return scan(query_pwm, BATCH; strands=BestStrand(), execution=execution)
+        return scan(query_pwm, BATCH; strands=BestStrand(), execution=scan_execution)
     end
     s_scan = stats(scan_times)
-    global QUERY_SCAN = scan(query_pwm, BATCH; strands=BestStrand(), execution=execution)
+    global QUERY_SCAN = scan(
+        query_pwm, BATCH; strands=BestStrand(), execution=scan_execution
+    )
     println(
         "      min=$(fmt_ms(Float64(s_scan.min_ns))) ms  median=$(fmt_ms(Float64(s_scan.median_ns))) ms  max=$(fmt_ms(Float64(s_scan.max_ns))) ms",
     )
@@ -134,7 +145,7 @@ function main()
     # ── 5. Scan one target model (timing) ──────────────────────────────────────
     println("\n[5/8] Scanning a single target model (BestStrand)...")
     single_scan_times = bench_repeat(N_REPS) do
-        return scan(target_pwms[1], BATCH; strands=BestStrand(), execution=execution)
+        return scan(target_pwms[1], BATCH; strands=BestStrand(), execution=scan_execution)
     end
     s_single = stats(single_scan_times)
     println(
@@ -147,7 +158,9 @@ function main()
         return global TARGET_PROFILES = [
             ScoreProfile(
                 target_pwms[i].name,
-                scan(target_pwms[i], BATCH; strands=BestStrand(), execution=execution),
+                scan(
+                    target_pwms[i], BATCH; strands=BestStrand(), execution=scan_execution
+                ),
             ) for i in 1:N_TARGETS
         ]
     end
@@ -179,7 +192,7 @@ function main()
         return compare(
             PREPARED,
             TARGET_PROFILES;
-            execution=execution,
+            outer_execution=outer_execution,
             metric=:co,
             search_range=10,
             window_radius=5,
@@ -189,7 +202,7 @@ function main()
     results50 = compare(
         PREPARED,
         TARGET_PROFILES;
-        execution=execution,
+        outer_execution=outer_execution,
         metric=:co,
         search_range=10,
         window_radius=5,
@@ -203,17 +216,16 @@ function main()
         "\n[E2E] Full end-to-end 1-vs-50 (query prepared, targets scanned + compared)..."
     )
     e2e_times = bench_repeat(N_REPS) do
-        for t in target_pwms
-            compare(
-                PREPARED,
-                t,
-                BATCH;
-                execution=execution,
-                metric=:co,
-                search_range=10,
-                window_radius=5,
-            )
-        end
+        compare(
+            PREPARED,
+            target_pwms,
+            BATCH;
+            outer_execution=outer_execution,
+            scan_execution=SerialExecution(),
+            metric=:co,
+            search_range=10,
+            window_radius=5,
+        )
     end
     s_e2e = stats(e2e_times)
     println(
@@ -228,7 +240,7 @@ function main()
         "  Sequence generation ($(N_SEQUENCES) x $(SEQ_LENGTH) bp):  $(fmt_ms(Float64(t_gen))) ms",
     )
     println(
-        "  Query scan (10000 x 100, w=$PWM_WIDTH):        $(fmt_ms(Float64(s_scan.median_ns))) ms (median)",
+        "  Query scan ($N_SEQUENCES x $SEQ_LENGTH, w=$PWM_WIDTH):        $(fmt_ms(Float64(s_scan.median_ns))) ms (median)",
     )
     println(
         "  Query profile preparation:              $(fmt_ms(Float64(s_prep.median_ns))) ms (median)",
@@ -266,7 +278,7 @@ function main()
         "  Throughput (end-to-end):                 $(@sprintf("%.0f", N_TARGETS / (Float64(s_e2e.median_ns) / 1e9))) comparisons/sec",
     )
     println(
-        "  Batch speedup vs 50 scalar calls:         $(@sprintf("%.1f", (Float64(s_one.median_ns) * 50) / Float64(s_fifty.median_ns)))x",
+        "  Batch speedup vs $N_TARGETS scalar calls:         $(@sprintf("%.1f", (Float64(s_one.median_ns) * N_TARGETS) / Float64(s_fifty.median_ns)))x",
     )
 
     # Show sample results

@@ -133,10 +133,48 @@ function lookup_score(table::LogTailTable, score::Float32)
 end
 
 """
+    _transform_scores_sorted!(out_data, table, input, first, last)
+
+Transform one contiguous input range exactly as [`lookup_score`](@ref), while
+accessing the large descending calibration table sequentially. Input indices
+are sorted by score, then each score advances a single table cursor to the
+first calibration score `<=` it. Results are written back in original order.
+"""
+function _transform_scores_sorted!(
+    out_data::Vector{Float32},
+    table::LogTailTable,
+    input::Vector{Float32},
+    first::Int,
+    last::Int,
+)
+    n = last - first + 1
+    n <= 0 && return nothing
+
+    permutation = sortperm(@view(input[first:last]); rev=true)
+    table_index = 1
+    table_scores = table.scores
+    table_log_tail = table.log_tail
+    n_table = length(table_scores)
+
+    @inbounds for local_index in permutation
+        input_index = first + local_index - 1
+        score = input[input_index]
+        while table_index < n_table && table_scores[table_index] > score
+            table_index += 1
+        end
+        out_data[input_index] = table_log_tail[table_index]
+    end
+    return nothing
+end
+
+"""
     transform_scores(table::LogTailTable, scores::RaggedArray{Float32})
 
-Apply the log-tail lookup to every element of a [`RaggedArray`](@ref),
-returning a new `RaggedArray{Float32}` with mapped values.
+Apply empirical log-tail normalization to every score. Each execution chunk
+sorts its input scores descending and performs a linear merge against the
+descending lookup table. This is exactly equivalent to applying
+[`lookup_score`](@ref) individually, but avoids cache-unfriendly binary
+searches in a large calibration table.
 """
 function transform_scores(
     table::LogTailTable,
@@ -150,9 +188,7 @@ function transform_scores(
     _parallel_for(scan_execution, nchunks) do chunk
         first = fld((chunk - 1) * n, nchunks) + 1
         last = fld(chunk * n, nchunks)
-        @inbounds for i in first:last
-            out_data[i] = lookup_score(table, scores.data[i])
-        end
+        _transform_scores_sorted!(out_data, table, scores.data, first, last)
     end
     return RaggedArray(out_data, copy(scores.offsets))
 end

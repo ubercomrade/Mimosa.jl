@@ -199,8 +199,9 @@ started Julia with four threads but still called APIs with their default
    build) takes ~920 ms total (~18 ms/model).
 
 4. The historical ~1.1× result did not exercise `ThreadedExecution`. Current
-   measurements must pass `execution=ThreadedExecution(n)` explicitly and
-   record both `Threads.nthreads()` and the selected policy.
+   one-to-many measurements pass `outer_execution=ThreadedExecution(n)`;
+   isolated scans use `scan_execution=ThreadedExecution(n)`. Both policies and
+   `Threads.nthreads()` are recorded.
 
 5. **No scaling advantage from batching.** The 1-vs-50 time is exactly 50× the
    1-vs-1 time (speedup = 1.0×), confirming that each target is processed

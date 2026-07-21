@@ -68,6 +68,25 @@ end
     @test row(transformed, 2) ≈ [t.log_tail[2], t.log_tail[3]]
 end
 
+@testset "sorted transform matches scalar lookup" begin
+    table = fit(EmpiricalLogTail(), Float32[4, 4, 3, 1, -2, -2])
+    rag = build_ragged([
+        Float32[8, 4, 3.5, 3, 2, 1, 0, -2, -3],
+        Float32[4, 4, -2],
+        Float32[],
+    ])
+    expected = Float32[lookup_score(table, score) for score in rag.data]
+
+    transformed = transform_scores(table, rag)
+    @test transformed.data == expected
+    @test transformed.offsets == rag.offsets
+
+    if Threads.nthreads() > 1
+        threaded = transform_scores(table, rag; scan_execution=ThreadedExecution(2))
+        @test threaded == transformed
+    end
+end
+
 @testset "normalize_bundle" begin
     # Build a simple strand bundle
     rag = build_ragged([Float32[3.0, 1.0], Float32[2.0, 2.0]])
