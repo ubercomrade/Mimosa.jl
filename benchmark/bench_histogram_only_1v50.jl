@@ -44,7 +44,7 @@ end
 function fit_histogram_only(
     strategy::HistogramOnlyEmpiricalLogTail,
     scores::AbstractVector{T};
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 ) where {T<:Real}
     values = Float32.(scores)
     all(isfinite, values) || throw(ArgumentError("normalization scores must be finite"))
@@ -58,12 +58,10 @@ function fit_histogram_only(
     else
         (maximum_score - minimum_score) / Float32(bins)
     end
-    nchunks = execution isa ThreadedExecution ? Mimosa._effective_ntasks(execution, n) : 1
+    nchunks = Mimosa._effective_ntasks(execution, n)
     counts = zeros(UInt32, bins, nchunks)
 
-    Mimosa._parallel_for(execution, nchunks) do chunk
-        first_index = fld((chunk - 1) * n, nchunks) + 1
-        last_index = fld(chunk * n, nchunks)
+    Mimosa._parallel_chunks(execution, n) do first_index, last_index, chunk
         @inbounds for index in first_index:last_index
             bin = histogram_index(values[index], minimum_score, bin_width, bins)
             counts[bin, chunk] += UInt32(1)
@@ -84,15 +82,11 @@ end
 function transform_histogram_only(
     table::HistogramOnlyLogTailTable,
     scores::RaggedArray{Float32};
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     n = length(scores.data)
     output = Vector{Float32}(undef, n)
-    nchunks =
-        execution isa ThreadedExecution ? Mimosa._effective_ntasks(execution, max(n, 1)) : 1
-    Mimosa._parallel_for(execution, nchunks) do chunk
-        first_index = fld((chunk - 1) * n, nchunks) + 1
-        last_index = fld(chunk * n, nchunks)
+    Mimosa._parallel_chunks(execution, n) do first_index, last_index, _
         @inbounds for index in first_index:last_index
             bin = histogram_index(
                 scores.data[index], table.minimum, table.bin_width, length(table.log_tail)
@@ -106,7 +100,7 @@ end
 function normalize_histogram_only(
     table::HistogramOnlyLogTailTable,
     bundle::StrandPair{<:RaggedArray{Float32}};
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     forward = transform_histogram_only(table, bundle.forward; execution=execution)
     bundle.forward === bundle.reverse && return StrandPair(forward, forward)
@@ -119,7 +113,7 @@ function Mimosa._fit_normalize(
     raw::StrandPair{<:RaggedArray{Float32}};
     calibration::StrandPair{<:RaggedArray{Float32}}=raw,
     tail_logfpr::Real=0.0,
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     isfinite(tail_logfpr) && tail_logfpr >= 0 ||
         throw(ArgumentError("tail_logfpr must be finite and non-negative"))
@@ -195,7 +189,7 @@ end
 
 function main_histogram_only()
     histogram_bins = parse_histogram_bins()
-    threaded = ThreadedExecution()
+    threaded = Execution(Threads.nthreads())
     exact_case = BenchmarkCase("Exact inner-threaded", Mimosa.EmpiricalLogTail(), threaded)
     hybrid_case = BenchmarkCase(
         "Hybrid exact-tail", HybridEmpiricalLogTail(HYBRID_BINS), threaded

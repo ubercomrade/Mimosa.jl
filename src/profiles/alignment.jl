@@ -521,7 +521,7 @@ function _score_orientation_pair_csr(
     window_radius::Int,
     realign_window::Int,
     metric::AbstractProfileMetric,
-    execution::ExecutionPolicy,
+    execution::Execution,
 )
     query_scores = query_strand == 1 ? query_bundle.forward : query_bundle.reverse
     target_scores = target_strand == 1 ? target_bundle.forward : target_bundle.reverse
@@ -530,10 +530,9 @@ function _score_orientation_pair_csr(
     scores = Vector{Float32}(undef, n_shifts)
     site_counts = Vector{Int}(undef, n_shifts)
     max_len = maximum((rowlength(query_scores, r) for r in 1:nrows(query_scores)); init=0)
-    nchunks = execution isa ThreadedExecution ? _effective_ntasks(execution, n_shifts) : 1
+    nchunks = _effective_ntasks(execution, n_shifts)
     scratches = [CandidateScratch(max_len) for _ in 1:nchunks]
-    _parallel_for(execution, nchunks) do chunk
-        first, last = _chunk_bounds(n_shifts, chunk, nchunks)
+    _parallel_chunks(execution, n_shifts) do first, last, chunk
         scratch = scratches[chunk]
         @inbounds for shift_index in first:last
             shift = shift_index - search_range - 1
@@ -588,7 +587,7 @@ function _score_orientation_pair(
     realign_window::Int,
     metric::AbstractProfileMetric,
     min_logfpr::Float32=0.0f0,
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     min_logfpr > 0.0f0 && return _score_orientation_pair_csr(
         query_bundle,
@@ -712,7 +711,7 @@ function profile_compare(
     target_bundle::StrandPair{<:RaggedArray{Float32}},
     target_anchors::Tuple{AnchorCSR,AnchorCSR},
     config::ProfileConfig;
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     metric = config.metric
 
@@ -783,7 +782,7 @@ function profile_compare(
     query_bundle::StrandPair{<:RaggedArray{Float32}},
     target_bundle::StrandPair{<:RaggedArray{Float32}},
     config::ProfileConfig;
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     threshold = config.min_logfpr
     query_anchors = _collect_both_anchors(query_bundle, threshold, execution)
@@ -870,7 +869,7 @@ Collect anchors for both strands and return `(forward_csr, reverse_csr)`.
 function _collect_both_anchors(
     bundle::StrandPair{<:RaggedArray{Float32}},
     threshold::Float32,
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     fwd_csr = collect_anchor_csr(bundle.forward, threshold; execution)
     if bundle.forward === bundle.reverse
@@ -893,7 +892,7 @@ function prepare_profile(
     model::ScoreProfile;
     min_logfpr::Real=0.0,
     normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
     cache=nothing,
 )
     threshold = Float32(min_logfpr)
@@ -929,7 +928,7 @@ function prepare_profile(
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     min_logfpr::Real=0.0,
     normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
     cache=nothing,
 )
     threshold = Float32(min_logfpr)
@@ -959,7 +958,7 @@ function _normalize_against_background(
     model::AbstractMotifModel,
     raw::StrandPair{<:RaggedArray{Float32}},
     background::EncodedSequenceBatch,
-    execution::ExecutionPolicy,
+    execution::Execution,
     normalization::AbstractNormalizationStrategy,
     tail_logfpr::Float32,
 )
@@ -996,7 +995,7 @@ function compare(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)
@@ -1033,7 +1032,7 @@ function compare(
     search_range::Int=10,
     window_radius::Int=10,
     realign_window::Int=3,
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     query.min_logfpr == target.min_logfpr ||
         throw(ArgumentError("prepared profiles use different min_logfpr thresholds."))
@@ -1066,7 +1065,7 @@ Each target is prepared (normalized, anchors collected) independently.
 function compare(
     query::PreparedProfile,
     targets::AbstractVector{<:ScoreProfile};
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
     metric::Union{AbstractString,Symbol,AbstractProfileMetric}=:co,
     search_range::Int=10,
     window_radius::Int=10,
@@ -1116,7 +1115,7 @@ end
 function compare(
     query::PreparedProfile,
     targets::AbstractVector{<:PreparedProfile};
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
     metric::Union{AbstractString,Symbol,AbstractProfileMetric}=:co,
     search_range::Int=10,
     window_radius::Int=10,
@@ -1157,7 +1156,7 @@ end
 """
     compare(query::PreparedProfile, target::AbstractMotifModel,
             sequences::EncodedSequenceBatch; metric=:co,
-            execution=SerialExecution(), kwargs...)
+            execution=Execution(), kwargs...)
 
 Compare a [`PreparedProfile`](@ref) against a motif model target by scanning
 the target against `sequences` and comparing profiles. The query's normalized
@@ -1173,7 +1172,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)
@@ -1212,7 +1211,7 @@ end
 """
     compare(query::AbstractMotifModel, target::PreparedProfile,
             sequences::EncodedSequenceBatch; metric=:co,
-            execution=SerialExecution(), kwargs...)
+            execution=Execution(), kwargs...)
 
 Compare a motif model query (scanned against `sequences`) against a
 [`PreparedProfile`](@ref) target. The target's normalized bundle and anchors
@@ -1228,7 +1227,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)
@@ -1274,7 +1273,7 @@ function compare(
     query::PreparedProfile,
     targets::AbstractVector{<:AbstractMotifModel},
     sequences::EncodedSequenceBatch;
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
     metric::Union{AbstractString,Symbol,AbstractProfileMetric}=:co,
     search_range::Int=10,
     window_radius::Int=10,
@@ -1337,7 +1336,7 @@ function compare(
     query::AbstractMotifModel,
     targets::AbstractVector{<:AbstractMotifModel},
     sequences::EncodedSequenceBatch;
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
     metric::Union{AbstractString,Symbol,AbstractProfileMetric}=:co,
     search_range::Int=10,
     window_radius::Int=10,

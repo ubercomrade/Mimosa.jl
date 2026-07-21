@@ -373,9 +373,9 @@ end
     batch = EncodedSequenceBatch(data, offsets)
 
     for strands in (ForwardOnly(), ReverseOnly(), BestStrand(), BothStrands())
-        serial = scan(pwm, batch; strands=strands, execution=SerialExecution())
+        serial = scan(pwm, batch; strands=strands, execution=Execution())
         for nt in (1, 2, 4)
-            threaded = scan(pwm, batch; strands=strands, execution=ThreadedExecution(nt))
+            threaded = scan(pwm, batch; strands=strands, execution=Execution(nt))
             if strands isa BothStrands
                 @test threaded.forward.data == serial.forward.data
                 @test threaded.reverse.data == serial.reverse.data

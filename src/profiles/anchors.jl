@@ -135,16 +135,14 @@ function collect_anchors(scores::RaggedArray{Float32}, threshold::Float32)
 end
 
 """
-    collect_anchor_csr(scores, threshold; execution=SerialExecution())
+    collect_anchor_csr(scores, threshold; execution=Execution())
 
 Collect anchors directly into deterministic CSR storage. Row counting and
 position collection are parallelized independently; the prefix sum preserves
 the serial row and position order.
 """
 function collect_anchor_csr(
-    scores::RaggedArray{Float32},
-    threshold::Float32;
-    execution::ExecutionPolicy=SerialExecution(),
+    scores::RaggedArray{Float32}, threshold::Float32; execution::Execution=Execution()
 )
     n = nrows(scores)
     costs = diff(scores.offsets)

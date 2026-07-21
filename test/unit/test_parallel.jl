@@ -2,36 +2,52 @@ using Test
 using Mimosa
 using SHA
 
-@testset "ExecutionPolicy" begin
-    @test SerialExecution() isa ExecutionPolicy
-    @test ThreadedExecution() isa ExecutionPolicy
-    @test ThreadedExecution(4).ntasks == 4
-    @test ThreadedExecution(1).ntasks == 1
-    @test_throws ArgumentError ThreadedExecution(0)
+@testset "Execution" begin
+    @test Execution() isa Execution
+    @test Execution() == Execution(1)
+    @test Execution(4).ntasks == 4
+    @test Execution(1).ntasks == 1
+    @test_throws ArgumentError Execution(0)
 
     # show
-    @test occursin("SerialExecution", sprint(show, SerialExecution()))
-    @test occursin("ThreadedExecution", sprint(show, ThreadedExecution(2)))
+    @test sprint(show, Execution()) == "Execution(ntasks=1)"
+    @test sprint(show, Execution(2)) == "Execution(ntasks=2)"
 end
 
-@testset "CLI execution policy" begin
+@testset "CLI execution" begin
     parsed = Mimosa.CLIParsed("profile")
     parsed.options["threads"] = string(Threads.nthreads())
-    policy = Mimosa._execution_policy(parsed)
-    if Threads.nthreads() == 1
-        @test policy isa SerialExecution
-    else
-        @test policy == ThreadedExecution(Threads.nthreads())
-    end
+    execution = Mimosa._execution(parsed)
+    @test execution == Execution(Threads.nthreads())
 
     parsed.options["threads"] = string(Threads.nthreads() + 1)
-    @test_throws Mimosa.CLIError Mimosa._execution_policy(parsed)
+    @test_throws Mimosa.CLIError Mimosa._execution(parsed)
+end
+
+@testset "_parallel_chunks" begin
+    for execution in (Execution(), Execution(4))
+        visits = zeros(Int, 37)
+        chunk_ids = zeros(Int, 37)
+        Mimosa._parallel_chunks(execution, length(visits)) do first, last, chunk
+            for i in first:last
+                visits[i] += 1
+                chunk_ids[i] = chunk
+            end
+        end
+        @test visits == ones(Int, length(visits))
+        @test issorted(chunk_ids)
+        @test maximum(chunk_ids) <= min(execution.ntasks, Threads.nthreads())
+    end
+
+    Mimosa._parallel_chunks(Execution(4), 0) do _, _, _
+        @test false
+    end
 end
 
 @testset "_parallel_for serial" begin
     # Basic serial execution
     results = Vector{Int}(undef, 10)
-    Mimosa._parallel_for(SerialExecution(), 10) do i
+    Mimosa._parallel_for(Execution(), 10) do i
         results[i] = i * 2
     end
     @test results == collect(2:2:20)
@@ -41,11 +57,11 @@ end
     # Threaded execution should produce same results as serial
     for ntasks in (1, 2, 4)
         results_t = Vector{Int}(undef, 100)
-        Mimosa._parallel_for(ThreadedExecution(ntasks), 100) do i
+        Mimosa._parallel_for(Execution(ntasks), 100) do i
             results_t[i] = i^2
         end
         results_s = Vector{Int}(undef, 100)
-        Mimosa._parallel_for(SerialExecution(), 100) do i
+        Mimosa._parallel_for(Execution(), 100) do i
             results_s[i] = i^2
         end
         @test results_t == results_s
@@ -53,23 +69,23 @@ end
 
     # Edge case: n=1
     results = Vector{Int}(undef, 1)
-    Mimosa._parallel_for(ThreadedExecution(4), 1) do i
+    Mimosa._parallel_for(Execution(4), 1) do i
         results[i] = 42
     end
     @test results == [42]
 
     # Edge case: n=0
-    Mimosa._parallel_for(ThreadedExecution(4), 0) do i
+    Mimosa._parallel_for(Execution(4), 0) do i
         @test false  # should not execute
     end
 end
 
 @testset "bounded and weighted execution" begin
-    @test Mimosa._effective_ntasks(ThreadedExecution(100), 100) == Threads.nthreads()
+    @test Mimosa._effective_ntasks(Execution(100), 100) == Threads.nthreads()
 
     visits = zeros(Int, 37)
     costs = [i % 7 == 0 ? 1000 : 1 for i in eachindex(visits)]
-    Mimosa._parallel_for_weighted(ThreadedExecution(4), costs) do i
+    Mimosa._parallel_for_weighted(Execution(4), costs) do i
         visits[i] += 1
     end
     @test visits == ones(Int, length(visits))
@@ -105,11 +121,9 @@ end
 
     # Test all strand policies
     for strands in (ForwardOnly(), ReverseOnly(), BestStrand(), BothStrands())
-        serial_result = scan(pwm, batch; strands=strands, execution=SerialExecution())
+        serial_result = scan(pwm, batch; strands=strands, execution=Execution())
         for nt in (1, 2, 4)
-            threaded_result = scan(
-                pwm, batch; strands=strands, execution=ThreadedExecution(nt)
-            )
+            threaded_result = scan(pwm, batch; strands=strands, execution=Execution(nt))
             if strands isa BothStrands
                 @test threaded_result.forward.data == serial_result.forward.data
                 @test threaded_result.forward.offsets == serial_result.forward.offsets
@@ -146,11 +160,9 @@ end
     batch = EncodedSequenceBatch(data, offsets)
 
     for strands in (ForwardOnly(), ReverseOnly(), BestStrand(), BothStrands())
-        serial_result = scan(model, batch; strands=strands, execution=SerialExecution())
+        serial_result = scan(model, batch; strands=strands, execution=Execution())
         for nt in (1, 2, 4)
-            threaded_result = scan(
-                model, batch; strands=strands, execution=ThreadedExecution(nt)
-            )
+            threaded_result = scan(model, batch; strands=strands, execution=Execution(nt))
             if strands isa BothStrands
                 @test threaded_result.forward.data == serial_result.forward.data
                 @test threaded_result.reverse.data == serial_result.reverse.data

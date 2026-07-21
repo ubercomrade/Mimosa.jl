@@ -148,9 +148,9 @@ kernel-only parallel execution model:
 
 | Case | Normalization | Target order | Computational kernels |
 |------|---------------|--------------|-----------------------|
-| Hybrid serial | `HybridEmpiricalLogTail` | Serial | `SerialExecution()` |
-| Hybrid inner-threaded | `HybridEmpiricalLogTail` | Serial | `ThreadedExecution()` |
-| Exact inner-threaded | `EmpiricalLogTail` | Serial | `ThreadedExecution()` |
+| Hybrid serial | `HybridEmpiricalLogTail` | Serial | `Execution()` |
+| Hybrid inner-threaded | `HybridEmpiricalLogTail` | Serial | `Execution(Threads.nthreads())` |
+| Exact inner-threaded | `EmpiricalLogTail` | Serial | `Execution(Threads.nthreads())` |
 
 Targets are processed one at a time. Scanning, normalization, anchor
 collection, and profile alignment use the available Julia threads inside each
@@ -160,7 +160,7 @@ policies.
 ### Running
 
 ```bash
-# One Julia thread (ThreadedExecution is effectively serial)
+# One Julia thread (`Execution(n)` is capped to sequential execution)
 JULIA_NUM_THREADS=1 julia --project=Mimosa.jl/benchmark Mimosa.jl/benchmark/bench_1v50.jl
 
 # Meaningful strategy comparison with four Julia threads
@@ -221,8 +221,8 @@ selection and are not comparable with the current benchmark.
    build) takes ~920 ms total (~18 ms/model).
 
 4. The historical ~1.1× result did not exercise the current kernel-level
-   `ThreadedExecution`. Current one-to-many measurements use a single
-   `execution=ThreadedExecution(n)` policy and record `Threads.nthreads()`.
+   parallelism. Current one-to-many measurements use a single
+   `execution=Execution(n)` setting and record `Threads.nthreads()`.
 
 5. **No scaling advantage from batching.** The 1-vs-50 time is exactly 50× the
    1-vs-1 time (speedup = 1.0×), confirming that each target is processed

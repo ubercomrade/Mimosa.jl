@@ -51,9 +51,10 @@ const EXAMPLES = joinpath(REPO_ROOT, "examples")
     @test isdefined(Mimosa, :savenull)
     @test isdefined(Mimosa, :loadnull)
 
-    # Execution policies
-    @test isdefined(Mimosa, :SerialExecution)
-    @test isdefined(Mimosa, :ThreadedExecution)
+    # Execution control
+    @test isdefined(Mimosa, :Execution)
+    @test !isdefined(Mimosa, :SerialExecution)
+    @test !isdefined(Mimosa, :ThreadedExecution)
 
     # Cache
     @test isdefined(Mimosa, :Cache)
@@ -159,7 +160,7 @@ end
     @test scores_both.reverse isa RaggedArray
 
     # Threaded scan == serial scan
-    scores_thr = scan(pwm, batch; strands=BestStrand(), execution=ThreadedExecution(2))
+    scores_thr = scan(pwm, batch; strands=BestStrand(), execution=Execution(2))
     @test scores_best == scores_thr
 
     # In-place scan on a single sequence
@@ -377,8 +378,8 @@ end
     pwm = readmodel(joinpath(EXAMPLES, "pif4.meme"))
     batch = make_random_sequences(20, 200; seed=123)
 
-    serial = scan(pwm, batch; strands=BestStrand(), execution=SerialExecution())
-    threaded = scan(pwm, batch; strands=BestStrand(), execution=ThreadedExecution(4))
+    serial = scan(pwm, batch; strands=BestStrand(), execution=Execution())
+    threaded = scan(pwm, batch; strands=BestStrand(), execution=Execution(4))
     @test serial == threaded
 end
 
@@ -500,8 +501,8 @@ function run()
             Mimosa.encode_sequence("GGGGACGTGGGG"),
         ]
         batch = EncodedSequenceBatch(rows)
-        s_fwd = scan(m, batch; strands=ForwardOnly(), execution=SerialExecution())
-        t_fwd = scan(m, batch; strands=ForwardOnly(), execution=ThreadedExecution(2))
+        s_fwd = scan(m, batch; strands=ForwardOnly(), execution=Execution())
+        t_fwd = scan(m, batch; strands=ForwardOnly(), execution=Execution(2))
         @test s_fwd == t_fwd
         @test nrows(s_fwd) == 3
         @test rowlength(s_fwd, 2) == 0

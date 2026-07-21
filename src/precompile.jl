@@ -42,7 +42,7 @@ function _precompile_workload()
 
     # Batch scan
     batch = make_random_sequences(5, 100; seed=42)
-    scan(pwm, batch; strands=BestStrand(), execution=SerialExecution())
+    scan(pwm, batch; strands=BestStrand(), execution=Execution())
 
     # ── Motif comparison ────────────────────────────────────────────────
     compare(pwm, pwm, batch; metric=OverlapCoefficient(), min_logfpr=0.0f0)

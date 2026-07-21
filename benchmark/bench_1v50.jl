@@ -4,12 +4,12 @@
 #   1. Hybrid serial and inner-threaded
 #      - HybridEmpiricalLogTail normalization;
 #      - targets are processed serially;
-#      - computational kernels inside each target use ThreadedExecution.
+#      - computational kernels inside each target use `Execution(nthreads)`.
 #
 #   2. Exact inner-threaded
 #      - EmpiricalLogTail normalization;
 #      - targets are processed serially;
-#      - computational kernels inside each target use ThreadedExecution.
+#      - computational kernels inside each target use `Execution(nthreads)`.
 #
 # Environment overrides:
 #   MIMOSA_BENCH_N_SEQUENCES, MIMOSA_BENCH_SEQ_LENGTH,
@@ -65,10 +65,10 @@ end
 
 fmt_ms(nanoseconds::Real) = @sprintf("%.3f", nanoseconds / 1.0e6)
 
-struct BenchmarkCase{N<:AbstractNormalizationStrategy,E<:ExecutionPolicy}
+struct BenchmarkCase{N<:AbstractNormalizationStrategy}
     label::String
     normalization::N
-    execution::E
+    execution::Execution
 end
 
 function show_case(case::BenchmarkCase)
@@ -197,9 +197,9 @@ function main()
     N_TARGETS > 0 || error("MIMOSA_BENCH_N_TARGETS must be positive")
     N_REPS > 0 || error("MIMOSA_BENCH_N_REPS must be positive")
 
-    threaded = ThreadedExecution()
+    threaded = Execution(Threads.nthreads())
     hybrid_serial_case = BenchmarkCase(
-        "Hybrid serial", HybridEmpiricalLogTail(HYBRID_BINS), SerialExecution()
+        "Hybrid serial", HybridEmpiricalLogTail(HYBRID_BINS), Execution()
     )
     hybrid_threaded_case = BenchmarkCase(
         "Hybrid inner-threaded", HybridEmpiricalLogTail(HYBRID_BINS), threaded

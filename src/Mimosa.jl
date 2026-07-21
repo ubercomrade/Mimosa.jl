@@ -174,8 +174,8 @@ export GEVFit,
     loadnull,
     NULL_FORMAT_VERSION
 
-# Parallelism exports
-export ExecutionPolicy, SerialExecution, ThreadedExecution
+# Execution control
+export Execution
 
 # Cache exports
 export Cache,

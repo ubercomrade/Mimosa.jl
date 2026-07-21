@@ -135,16 +135,15 @@ function HybridNormalizationWorkspace(bins::Int, nchunks::Int)
     )
 end
 
-function _copy_score_summary(scores::AbstractVector{<:Real}, execution::ExecutionPolicy)
+function _copy_score_summary(scores::AbstractVector{<:Real}, execution::Execution)
     n = length(scores)
     values = Vector{Float32}(undef, n)
     n == 0 && return values, 0.0f0, 0.0f0
-    nchunks = execution isa ThreadedExecution ? _effective_ntasks(execution, n) : 1
+    nchunks = _effective_ntasks(execution, n)
     minima = fill(Inf32, nchunks)
     maxima = fill(-Inf32, nchunks)
     source_first = firstindex(scores)
-    _parallel_for(execution, nchunks) do chunk
-        first, last = _chunk_bounds(n, chunk, nchunks)
+    _parallel_chunks(execution, n) do first, last, chunk
         local_minimum = Inf32
         local_maximum = -Inf32
         finite = true
@@ -167,7 +166,7 @@ function fit(
     strategy::HybridEmpiricalLogTail,
     scores::AbstractVector{T};
     tail_logfpr::Real=0.0,
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 ) where {T<:Real}
     values, lo, hi = _copy_score_summary(scores, execution)
     n = length(scores)
@@ -176,10 +175,9 @@ function fit(
     )
     width = lo == hi ? 1.0f0 : (hi - lo) / Float32(strategy.bins)
     bins = lo == hi ? 1 : strategy.bins
-    nchunks = execution isa ThreadedExecution ? _effective_ntasks(execution, n) : 1
+    nchunks = _effective_ntasks(execution, n)
     ws = HybridNormalizationWorkspace(bins, nchunks)
-    _parallel_for(execution, nchunks) do chunk
-        first, last = _chunk_bounds(n, chunk, nchunks)
+    _parallel_chunks(execution, n) do first, last, chunk
         if first <= last
             @inbounds for i in first:last
                 index = if lo == hi
@@ -208,8 +206,7 @@ function fit(
     cutoff_bin = findlast(>=(cutoff_count), cumulative)
     cutoff_bin = something(cutoff_bin, 1)
 
-    _parallel_for(execution, nchunks) do chunk
-        first, last = _chunk_bounds(n, chunk, nchunks)
+    _parallel_chunks(execution, n) do first, last, chunk
         count = 0
         @inbounds for i in first:last
             index =
@@ -223,8 +220,7 @@ function fit(
         ws.tail_offsets[chunk + 1] = ws.tail_offsets[chunk] + ws.tail_counts[chunk]
     end
     resize!(ws.exact_tail, ws.tail_offsets[end] - 1)
-    _parallel_for(execution, nchunks) do chunk
-        first, last = _chunk_bounds(n, chunk, nchunks)
+    _parallel_chunks(execution, n) do first, last, chunk
         destination = ws.tail_offsets[chunk]
         @inbounds for i in first:last
             index =
@@ -256,7 +252,7 @@ function _empirical_workspace(bundle::StrandPair{<:RaggedArray{Float32}})
 end
 
 """
-    _fit_normalize_empirical(raw; calibration=raw, execution=SerialExecution())
+    _fit_normalize_empirical(raw; calibration=raw, execution=Execution())
 
 Canonical empirical-normalization pipeline. It fits a table only from
 `calibration` and applies that table to `raw`.
@@ -264,7 +260,7 @@ Canonical empirical-normalization pipeline. It fits a table only from
 function _fit_normalize_empirical(
     raw::StrandPair{<:RaggedArray{Float32}};
     calibration::StrandPair{<:RaggedArray{Float32}}=raw,
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     table = _fit_empirical_table!(_empirical_workspace(calibration))
     return table, normalize_bundle(table, raw; execution=execution)
@@ -275,7 +271,7 @@ function _fit_normalize(
     raw::StrandPair{<:RaggedArray{Float32}};
     calibration::StrandPair{<:RaggedArray{Float32}}=raw,
     tail_logfpr::Real=0.0,
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     return _fit_normalize_empirical(raw; calibration, execution)
 end
@@ -285,7 +281,7 @@ function _fit_normalize(
     raw::StrandPair{<:RaggedArray{Float32}};
     calibration::StrandPair{<:RaggedArray{Float32}}=raw,
     tail_logfpr::Real=0.0,
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     table = fit(strategy, _empirical_workspace(calibration); tail_logfpr, execution)
     return table, normalize_bundle(table, raw; execution)
@@ -346,14 +342,11 @@ end
 function transform_scores(
     table::HybridLogTailTable,
     scores::RaggedArray{Float32};
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     n = length(scores.data)
     out = Vector{Float32}(undef, n)
-    nchunks = execution isa ThreadedExecution ? _effective_ntasks(execution, max(n, 1)) : 1
-    _parallel_for(execution, nchunks) do chunk
-        first = fld((chunk - 1) * n, nchunks) + 1
-        last = fld(chunk * n, nchunks)
+    _parallel_chunks(execution, n) do first, last, _
         @inbounds for i in first:last
             out[i] = lookup_score(table, scores.data[i])
         end
@@ -406,17 +399,12 @@ descending lookup table. This is exactly equivalent to applying
 searches in a large calibration table.
 """
 function transform_scores(
-    table::LogTailTable,
-    scores::RaggedArray{Float32};
-    execution::ExecutionPolicy=SerialExecution(),
+    table::LogTailTable, scores::RaggedArray{Float32}; execution::Execution=Execution()
 )
     n = length(scores.data)
     n == 0 && return RaggedArray(Float32[], copy(scores.offsets))
     out_data = Vector{Float32}(undef, n)
-    nchunks = execution isa ThreadedExecution ? _effective_ntasks(execution, n) : 1
-    _parallel_for(execution, nchunks) do chunk
-        first = fld((chunk - 1) * n, nchunks) + 1
-        last = fld(chunk * n, nchunks)
+    _parallel_chunks(execution, n) do first, last, _
         return _transform_scores_sorted!(out_data, table, scores.data, first, last)
     end
     return RaggedArray(out_data, copy(scores.offsets))
@@ -445,7 +433,7 @@ Apply the log-tail lookup to both strands of a profile bundle.
 function normalize_bundle(
     table::LogTailTable,
     bundle::StrandPair{<:RaggedArray{Float32}};
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     fwd = transform_scores(table, bundle.forward; execution=execution)
     bundle.forward === bundle.reverse && return StrandPair(fwd, fwd)
@@ -456,7 +444,7 @@ end
 function normalize_bundle(
     table::HybridLogTailTable,
     bundle::StrandPair{<:RaggedArray{Float32}};
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     fwd = transform_scores(table, bundle.forward; execution)
     bundle.forward === bundle.reverse && return StrandPair(fwd, fwd)

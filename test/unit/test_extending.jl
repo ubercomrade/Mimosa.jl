@@ -385,7 +385,7 @@ end
     ]
     batch = EncodedSequenceBatch(rows)
 
-    serial_fwd = scan(m, batch; strands=ForwardOnly(), execution=SerialExecution())
+    serial_fwd = scan(m, batch; strands=ForwardOnly(), execution=Execution())
     @test nrows(serial_fwd) == 4
     @test rowlength(serial_fwd, 1) == 5
     @test rowlength(serial_fwd, 2) == 0
@@ -393,14 +393,14 @@ end
     @test rowlength(serial_fwd, 4) == 9
     @test row(serial_fwd, 4)[5] == 4.0f0
 
-    both_serial = scan(m, batch; strands=BothStrands(), execution=SerialExecution())
-    both_threaded = scan(m, batch; strands=BothStrands(), execution=ThreadedExecution(2))
+    both_serial = scan(m, batch; strands=BothStrands(), execution=Execution())
+    both_threaded = scan(m, batch; strands=BothStrands(), execution=Execution(2))
     @test both_serial.forward == both_threaded.forward
     @test both_serial.reverse == both_threaded.reverse
 
     # BestStrand threaded == serial, order preserved.
-    best_serial = scan(m, batch; strands=BestStrand(), execution=SerialExecution())
-    best_threaded = scan(m, batch; strands=BestStrand(), execution=ThreadedExecution(2))
+    best_serial = scan(m, batch; strands=BestStrand(), execution=Execution())
+    best_threaded = scan(m, batch; strands=BestStrand(), execution=Execution(2))
     @test best_serial == best_threaded
 end
 

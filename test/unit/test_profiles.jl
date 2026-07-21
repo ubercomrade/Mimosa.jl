@@ -16,17 +16,15 @@ end
 @testset "Hybrid normalization serial/threaded equivalence" begin
     scores = Float32[sin(index / 7) + (index % 11) / 10 for index in 1:10_000]
     strategy = HybridEmpiricalLogTail(256)
-    serial = fit(strategy, scores; tail_logfpr=2.0, execution=SerialExecution())
-    threaded = fit(strategy, scores; tail_logfpr=2.0, execution=ThreadedExecution(4))
+    serial = fit(strategy, scores; tail_logfpr=2.0, execution=Execution())
+    threaded = fit(strategy, scores; tail_logfpr=2.0, execution=Execution(4))
 
     @test threaded.minimum == serial.minimum
     @test threaded.bin_width == serial.bin_width
     @test threaded.log_tail == serial.log_tail
     @test threaded.exact_tail.scores == serial.exact_tail.scores
     @test threaded.exact_tail.log_tail == serial.exact_tail.log_tail
-    @test_throws ArgumentError fit(
-        strategy, Float32[1.0, NaN32]; execution=ThreadedExecution(2)
-    )
+    @test_throws ArgumentError fit(strategy, Float32[1.0, NaN32]; execution=Execution(2))
 end
 
 @testset "LogTailTable fit" begin
@@ -104,7 +102,7 @@ end
     @test transformed.offsets == rag.offsets
 
     if Threads.nthreads() > 1
-        threaded = transform_scores(table, rag; execution=ThreadedExecution(2))
+        threaded = transform_scores(table, rag; execution=Execution(2))
         @test threaded == transformed
     end
 end
@@ -221,9 +219,7 @@ end
     scores = build_ragged([Float32[0.1, 0.9, 0.9], Float32[], Float32[0.8, 0.2, 0.7, 0.8]])
     for threshold in (0.0f0, 0.75f0)
         serial = Mimosa.collect_anchor_csr(scores, threshold)
-        threaded = Mimosa.collect_anchor_csr(
-            scores, threshold; execution=ThreadedExecution(4)
-        )
+        threaded = Mimosa.collect_anchor_csr(scores, threshold; execution=Execution(4))
         @test threaded.positions == serial.positions
         @test threaded.offsets == serial.offsets
     end
@@ -291,7 +287,7 @@ end
     thresholded = prepare_profile(sp1; min_logfpr=0.25)
     threshold_serial = compare(thresholded, sp2; search_range=3, window_radius=2)
     threshold_threaded = compare(
-        thresholded, sp2; search_range=3, window_radius=2, execution=ThreadedExecution(4)
+        thresholded, sp2; search_range=3, window_radius=2, execution=Execution(4)
     )
     @test threshold_serial.score isa Float32
     @test threshold_threaded == threshold_serial
@@ -334,7 +330,7 @@ end
         search_range=2,
         window_radius=1,
         realign_window=1,
-        execution=SerialExecution(),
+        execution=Execution(),
     )
     prepared = compare(
         prepare_profile(query, batch),
@@ -344,7 +340,7 @@ end
         search_range=2,
         window_radius=1,
         realign_window=1,
-        execution=SerialExecution(),
+        execution=Execution(),
     )
     @test [r.target for r in serial] == ["target1", "target2"]
     @test prepared == serial
@@ -357,7 +353,7 @@ end
         search_range=2,
         window_radius=1,
         realign_window=1,
-        execution=ThreadedExecution(4),
+        execution=Execution(4),
     )
     @test threaded == serial
 
@@ -369,7 +365,7 @@ end
         search_range=2,
         window_radius=1,
         realign_window=1,
-        execution=ThreadedExecution(2),
+        execution=Execution(2),
     )
     @test scan_threaded == serial[1]
 end

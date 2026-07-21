@@ -10,7 +10,7 @@ using Mimosa
 
     scores = Float32[sin(index) for index in 1:1_000]
     table = @inferred fit(
-        HybridEmpiricalLogTail(256), scores; tail_logfpr=2.0, execution=ThreadedExecution(2)
+        HybridEmpiricalLogTail(256), scores; tail_logfpr=2.0, execution=Execution(2)
     )
     @test table isa HybridLogTailTable
 end

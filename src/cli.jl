@@ -97,7 +97,7 @@ function _resolve_sequences(
     return make_random_sequences(num_sequences, seq_length; seed=seed)
 end
 
-function _execution_policy(parsed::CLIParsed)
+function _execution(parsed::CLIParsed)
     threads_str = get(parsed.options, "threads", "1")
     requested = tryparse(Int, threads_str)
     requested === nothing && throw(CLIError("--threads must be a positive integer."))
@@ -110,7 +110,7 @@ function _execution_policy(parsed::CLIParsed)
             "start Julia with --threads=$requested or set JULIA_NUM_THREADS=$requested.",
         ),
     )
-    return requested == 1 ? SerialExecution() : ThreadedExecution(requested)
+    return Execution(requested)
 end
 
 # ── JSON output ─────────────────────────────────────────────────────────────
@@ -366,7 +366,7 @@ function _run_profile(parsed::CLIParsed)
     bg_freq = _cli_float32(parsed, "background-freq", "0.25")
     fasta = get(parsed.options, "fasta", nothing)
     bg_fasta = get(parsed.options, "background", nothing)
-    execution = _execution_policy(parsed)
+    execution = _execution(parsed)
     cache =
         haskey(parsed.options, "cache-dir") ? Cache(parsed.options["cache-dir"]) : nothing
     normalization = HybridEmpiricalLogTail()
@@ -559,7 +559,7 @@ function _run_build_null(parsed::CLIParsed)
         throw(CLIError("--realign-window must be a non-negative integer."))
     isfinite(min_logfpr) || throw(CLIError("--min-logfpr must be a finite number."))
 
-    exec_policy = _execution_policy(parsed)
+    execution = _execution(parsed)
     normalization = HybridEmpiricalLogTail()
 
     sequences = if isnothing(fasta)
@@ -573,7 +573,7 @@ function _run_build_null(parsed::CLIParsed)
         n_samples=n_samples,
         shuffle=shuffle,
         seed=seed,
-        execution=exec_policy,
+        execution=execution,
         sequences=sequences,
         search_range=search_range,
         window_radius=window_radius,

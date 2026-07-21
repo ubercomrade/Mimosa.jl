@@ -51,8 +51,8 @@ julia --project=build build/build_app.jl
 julia --project=build build/smoke_app.jl dist/Mimosa
 ```
 
-Threaded validation must start Julia with multiple runtime threads and pass an
-explicit `ThreadedExecution` policy in the workflow being measured.
+Parallel validation must start Julia with multiple runtime threads and pass an
+explicit `Execution(n)` setting with `n > 1` in the workflow being measured.
 
 ## Release Invariants
 
@@ -72,4 +72,4 @@ explicit `ThreadedExecution` policy in the workflow being measured.
 Warm compilation first, record Julia/CPU/runtime thread count, use identical
 inputs and seed, and report median time plus allocations. Distinguish raw
 profile comparison, prepared alignment, model scan-to-compare, and one-to-many
-workloads. Threaded benchmarks must pass `ThreadedExecution(...)` explicitly.
+workloads. Threaded benchmarks must pass `Execution(...)` explicitly.

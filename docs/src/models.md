@@ -69,7 +69,7 @@ All models support the same scanning API via multiple dispatch:
 
 ```julia
 scan(model, sequence; strands=BestStrand())
-scan(model, batch; strands=BestStrand(), execution=SerialExecution())
+scan(model, batch; strands=BestStrand(), execution=Execution())
 scan!(dest, model, sequence; strands=ForwardOnly())
 ```
 

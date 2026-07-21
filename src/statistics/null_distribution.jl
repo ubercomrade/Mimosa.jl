@@ -174,7 +174,7 @@ end
 
 """
     build_null(models; sequences=batch, metric=:co, n_samples=2000,
-               shuffle=false, seed=127, execution=SerialExecution())
+               shuffle=false, seed=127, execution=Execution())
 
 Build a null distribution from randomly sampled query-target comparisons.
 
@@ -189,14 +189,14 @@ distribution.
 - `n_samples`: number of random comparisons (default 2000).
 - `shuffle`: shuffle PWM columns and A/C/G/T weights within each column.
 - `seed`: random seed for reproducible sampling and shuffling.
-- `execution`: [`ExecutionPolicy`](@ref) for scanning, normalization, anchor
+- `execution`: [`Execution`](@ref) for scanning, normalization, anchor
   collection, and profile alignment within each comparison.
 
 Returns a [`NullBuildResult`](@ref).
 
-Models and sampled pairs are processed in stable order. Under
-`ThreadedExecution`, the computational kernels within each model comparison
-use multiple Julia threads and preserve serial numerical results.
+Models and sampled pairs are processed in stable order. With `Execution(n)`
+for `n > 1`, the computational kernels within each model comparison use
+multiple Julia threads and preserve sequential numerical results.
 """
 function build_null(
     models::AbstractVector;
@@ -204,7 +204,7 @@ function build_null(
     n_samples::Int=2000,
     shuffle::Bool=false,
     seed::Int=127,
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
     sequences::EncodedSequenceBatch,
     background::Union{Nothing,EncodedSequenceBatch}=nothing,
     search_range::Int=10,
@@ -233,7 +233,7 @@ end
 function build_null(
     models::AbstractVector,
     config::NullBuildConfig{<:AbstractProfileMetric};
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
     sequences::EncodedSequenceBatch,
     background::Union{Nothing,EncodedSequenceBatch}=nothing,
     search_range::Int=10,

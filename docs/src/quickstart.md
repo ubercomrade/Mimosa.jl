@@ -125,11 +125,11 @@ motif comparison, thread sequence scanning explicitly:
 ```julia
 comparison = compare(
     query, target, sequences;
-    execution=ThreadedExecution(4),
+    execution=Execution(4),
 )
 ```
 
-Use the same `execution` policy for `build_null` and one-to-many comparisons.
+Use the same `execution` setting for `build_null` and one-to-many comparisons.
 Targets remain serial while each comparison uses threaded computational
 kernels.
 
@@ -138,9 +138,11 @@ scores = scan(
     model,
     sequences;
     strands=BestStrand(),
-    execution=ThreadedExecution(4),
+    execution=Execution(4),
 )
 ```
 
-`SerialExecution()` is the default. Threaded and serial workflows preserve
-result ordering and exact discrete fields.
+`Execution()` is the default and is equivalent to `Execution(1)`. Values
+greater than one enable kernel-level parallelism, capped by the number of
+Julia runtime threads. Sequential and parallel workflows preserve result
+ordering and exact discrete fields.

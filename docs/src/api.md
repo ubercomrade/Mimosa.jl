@@ -78,8 +78,9 @@ for a context model, the motif starts at
 `scan_position + site_start_offset(model)`. See [Data Layout](data_layout.md)
 for coordinate details.
 
-`SerialExecution()` is the default. Threaded scanning requires Julia runtime
-threads and an explicit policy:
+`Execution()` is equivalent to `Execution(1)` and uses the sequential fast
+path. Parallel scanning requires Julia runtime threads and an explicit task
+count:
 
 ```bash
 JULIA_NUM_THREADS=4 julia --project=.
@@ -90,7 +91,7 @@ scores = scan(
     model,
     sequences;
     strands=BestStrand(),
-    execution=ThreadedExecution(4),
+    execution=Execution(4),
 )
 ```
 
@@ -173,7 +174,7 @@ results = compare(
     [target, readmodel("examples/foxa2.meme")],
     sequences;
     metric=:cosine,
-    execution=ThreadedExecution(4),
+    execution=Execution(4),
     cache=cache,
 )
 ```
@@ -300,7 +301,7 @@ Common fixes:
 - **No null targets**: check motif names and ensure each query has an eligible
   motif from another group.
 - **Too few Julia threads**: set `JULIA_NUM_THREADS` before starting Julia;
-  `ThreadedExecution` cannot create runtime threads.
+  `Execution(n)` cannot create runtime threads.
 
 ## Core API entries
 
@@ -333,8 +334,6 @@ AnnotatedResult
 annotate_results
 to_dict
 to_json
-ExecutionPolicy
-SerialExecution
-ThreadedExecution
+Execution
 MimosaError
 ```

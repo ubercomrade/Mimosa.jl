@@ -405,7 +405,7 @@ end
         n_samples=12,
         shuffle=true,
         seed=19,
-        execution=SerialExecution(),
+        execution=Execution(),
     )
     serial_scores = serial_result.distribution.raw_scores
 
@@ -416,7 +416,7 @@ end
             n_samples=12,
             shuffle=true,
             seed=19,
-            execution=ThreadedExecution(nt),
+            execution=Execution(nt),
         )
         threaded_scores = threaded_result.distribution.raw_scores
         @test threaded_scores == serial_scores

@@ -91,7 +91,7 @@ end
         n_samples=12,
         shuffle=true,
         seed=9,
-        execution=ThreadedExecution(2),
+        execution=Execution(2),
     )
     @test scan_threaded.distribution.raw_scores == dist.raw_scores
     @test scan_threaded.distribution.pairs == dist.pairs

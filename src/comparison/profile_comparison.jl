@@ -32,7 +32,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Real=0.0,
     normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)
@@ -113,7 +113,7 @@ function compare(
     min_logfpr::Real=0.0,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)

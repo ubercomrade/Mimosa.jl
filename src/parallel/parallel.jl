@@ -1,110 +1,72 @@
-# Execution policies for computational kernels.
+# Execution control for computational kernels.
 #
 # Targets and comparison pairs remain serial. Parallelism is applied inside
 # independent computational kernels such as sequence scanning, normalization,
 # anchor collection, and profile alignment.
-#
-# Design per ADR 0004 (parallelism-and-rng):
-#   - `SerialExecution` processes items in order.
-#   - `ThreadedExecution(ntasks)` uses at most `ntasks` worker tasks and never
-#     exceeds the number of Julia threads available to the process.
 
 """
-    ExecutionPolicy
+    Execution(ntasks=1)
 
-Abstract supertype for parallel execution policies.
+Control the maximum number of Julia tasks used by computational kernels.
 
-Concrete policies:
-- [`SerialExecution`](@ref): process items sequentially (default).
-- [`ThreadedExecution`](@ref): process items using multiple Julia threads.
+`Execution(1)` uses the allocation-free sequential path. `Execution(n)` with
+`n > 1` schedules at most `n` worker tasks on Julia's thread pool, capped by
+`Threads.nthreads()` and the amount of available work.
+
+Results are written into pre-allocated slots indexed by their original
+position, preserving deterministic output order.
 """
-abstract type ExecutionPolicy end
-
-"""
-    SerialExecution
-
-Execute items in sequential order. This is the default policy and guarantees
-deterministic, single-threaded execution.
-"""
-struct SerialExecution <: ExecutionPolicy end
-
-"""
-    ThreadedExecution
-
-Execute items using multiple Julia tasks running on separate threads.
-
-Fields:
-- `ntasks::Int`: maximum number of concurrent tasks. Defaults to
-  `Threads.nthreads()` when constructed with no arguments.
-
-Results are written into pre-allocated slots indexed by original position,
-so the output order and values are identical to `SerialExecution`.
-"""
-struct ThreadedExecution <: ExecutionPolicy
+struct Execution{N}
     ntasks::Int
 
-    function ThreadedExecution(ntasks::Integer)
-        ntasks < 1 && throw(ArgumentError("ntasks must be ≥ 1, got $ntasks."))
-        return new(Int(ntasks))
+    function Execution{N}() where {N}
+        N isa Int || throw(ArgumentError("ntasks must be an Int, got $N."))
+        N < 1 && throw(ArgumentError("ntasks must be ≥ 1, got $N."))
+        return new{N}(N)
     end
 end
 
-ThreadedExecution() = ThreadedExecution(max(1, Threads.nthreads()))
+Execution(ntasks::Integer=1) = Execution{Int(ntasks)}()
 
-function Base.show(io::IO, ::SerialExecution)
-    return print(io, "SerialExecution()")
+function Base.show(io::IO, execution::Execution)
+    return print(io, "Execution(ntasks=$(execution.ntasks))")
 end
 
-function Base.show(io::IO, pol::ThreadedExecution)
-    return print(io, "ThreadedExecution(ntasks=$(pol.ntasks))")
-end
-
-# ── Parallel map helper ───────────────────────────────────────────────────
-#
-# `_parallel_for(policy, n, f!)` — iterate `f!(i)` for `i in 1:n`.
-# Under `SerialExecution` this is a simple loop. Under `ThreadedExecution`
-# it uses a bounded dynamic queue with at most `ntasks` workers.
-#
-# The caller is responsible for pre-allocating result slots and ensuring
-# `f!` is thread-safe (no shared mutable state, no `push!` to shared vectors).
-
-"""
-    _parallel_for(f!, policy::ExecutionPolicy, n::Int)
-
-Execute `f!(i)` for each `i in 1:n` according to `policy`.
-
-Under `SerialExecution`, this is a simple `for` loop. Under
-`ThreadedExecution`, indices are claimed from a bounded dynamic queue. The
-function `f!` must be thread-safe: no shared mutable
-state, no `push!` to shared vectors, results written only to pre-allocated
-slots indexed by `i`.
-"""
-function _parallel_for end
-
-function _effective_ntasks(pol::ThreadedExecution, n::Int)
-    return min(pol.ntasks, n, max(1, Threads.nthreads()))
+function _effective_ntasks(::Execution{N}, n::Int) where {N}
+    return min(N, n, Threads.nthreads())
 end
 
 @inline function _chunk_bounds(n::Int, chunk::Int, nchunks::Int)
     return (fld((chunk - 1) * n, nchunks) + 1, fld(chunk * n, nchunks))
 end
 
-function _parallel_for(f!, ::SerialExecution, n::Int)
-    @inbounds for i in 1:n
+"""
+    _parallel_for(f!, execution, n)
+
+Execute `f!(i)` for every `i in 1:n`. Work is claimed dynamically to balance
+independent items with unknown or moderately varying cost. The callback must
+not mutate shared state except for pre-allocated slots owned by `i`.
+"""
+function _parallel_for(f!, ::Execution{1}, n::Int)
+    for i in 1:n
         f!(i)
     end
     return nothing
 end
 
-function _parallel_for(f!, pol::ThreadedExecution, n::Int)
+function _parallel_for(f!, execution::Execution, n::Int)
     n <= 0 && return nothing
+    ntasks = _effective_ntasks(execution, n)
 
-    ntasks = _effective_ntasks(pol, n)
-    ntasks <= 1 && return _parallel_for(f!, SerialExecution(), n)
+    if ntasks <= 1
+        for i in 1:n
+            f!(i)
+        end
+        return nothing
+    end
 
-    # A bounded queue avoids stranding a worker behind a long ragged item.
     next_index = Threads.Atomic{Int}(1)
-    @sync for t in 1:ntasks
+    @sync for _ in 1:ntasks
         Threads.@spawn begin
             while true
                 i = Threads.atomic_add!(next_index, 1)
@@ -113,39 +75,67 @@ function _parallel_for(f!, pol::ThreadedExecution, n::Int)
             end
         end
     end
-
     return nothing
 end
 
 """
-    _parallel_for_weighted(f!, policy, costs)
+    _parallel_chunks(f!, execution, n)
 
-Execute indices using contiguous, approximately equal-cost blocks. Blocks are
-smaller than a worker's full share so ragged heavy items can still be balanced
-dynamically, while each atomic queue operation claims several adjacent items.
+Divide `1:n` into at most `execution.ntasks` contiguous chunks and call
+`f!(first, last, chunk)` once for each chunk. This is intended for dense loops
+that need per-worker scratch space or deterministic local reductions.
 """
-function _parallel_for_weighted(f!, ::SerialExecution, costs::AbstractVector{<:Integer})
-    return _parallel_for(f!, SerialExecution(), length(costs))
+function _parallel_chunks(f!, ::Execution{1}, n::Int)
+    n > 0 && f!(1, n, 1)
+    return nothing
 end
 
+function _parallel_chunks(f!, execution::Execution, n::Int)
+    n <= 0 && return nothing
+    nchunks = _effective_ntasks(execution, n)
+
+    if nchunks <= 1
+        f!(1, n, 1)
+        return nothing
+    end
+
+    @sync for chunk in 1:nchunks
+        first, last = _chunk_bounds(n, chunk, nchunks)
+        Threads.@spawn f!(first, last, chunk)
+    end
+    return nothing
+end
+
+"""
+    _parallel_for_weighted(f!, execution, costs)
+
+Execute indices in contiguous, approximately equal-cost blocks. Blocks are
+smaller than a worker's full share so ragged heavy items remain dynamically
+balanced while each atomic queue operation claims several adjacent items.
+"""
 function _parallel_for_weighted(
-    f!, pol::ThreadedExecution, costs::AbstractVector{<:Integer}
+    f!, execution::Execution{1}, costs::AbstractVector{<:Integer}
 )
+    return _parallel_for(f!, execution, length(costs))
+end
+
+function _parallel_for_weighted(f!, execution::Execution, costs::AbstractVector{<:Integer})
     n = length(costs)
     n == 0 && return nothing
-    ntasks = _effective_ntasks(pol, n)
-    ntasks <= 1 && return _parallel_for(f!, SerialExecution(), n)
+    ntasks = _effective_ntasks(execution, n)
+    ntasks <= 1 && return _parallel_for(f!, execution, n)
 
     total_cost = 0
-    @inbounds for cost in costs
+    for cost in costs
         total_cost += max(Int(cost), 1)
     end
     target_cost = max(1, cld(total_cost, ntasks * 8))
 
     ranges = UnitRange{Int}[]
+    sizehint!(ranges, min(n, ntasks * 8))
     start = 1
     accumulated = 0
-    @inbounds for i in 1:n
+    for i in 1:n
         accumulated += max(Int(costs[i]), 1)
         if accumulated >= target_cost
             push!(ranges, start:i)
@@ -155,8 +145,8 @@ function _parallel_for_weighted(
     end
     start <= n && push!(ranges, start:n)
 
-    return _parallel_for(pol, length(ranges)) do block_index
-        @inbounds for i in ranges[block_index]
+    return _parallel_for(execution, length(ranges)) do block_index
+        for i in ranges[block_index]
             f!(i)
         end
     end

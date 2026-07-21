@@ -89,14 +89,14 @@ julia -m Mimosa \
 
 ## Threading
 
-`--threads=N` selects `ThreadedExecution(N)` but cannot create Julia runtime
+`--threads=N` selects `Execution(N)` but cannot create Julia runtime
 threads. Start Julia with `--threads=N` or `JULIA_NUM_THREADS=N`. The CLI rejects
 a request larger than `Threads.nthreads()`.
 
 Mimosa uses one Julia process and shared memory. Targets and null pairs retain
 stable serial order; `--threads` parallelizes scanning, Hybrid normalization,
 anchor collection, and profile alignment within each comparison. It is the
-only CLI control for Mimosa's execution policy.
+only CLI control for Mimosa's execution task count.
 
 ## Process Contract
 

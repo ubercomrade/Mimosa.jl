@@ -12,14 +12,14 @@ model = readmodel(path)
 writemodel(path, model)
 batch, names = readsequences(fasta_path)
 
-scores = scan(model, batch; strands=BestStrand(), execution=SerialExecution())
+scores = scan(model, batch; strands=BestStrand(), execution=Execution())
 result = compare(query, target, batch; metric=:co)
 
 prepared = prepare_profile(score_profile)
-results = compare(prepared, targets; execution=ThreadedExecution(4))
+results = compare(prepared, targets; execution=Execution(4))
 
-sites = selectsites(model, batch, selector; execution=SerialExecution())
-pfm = reconstruct_pfm(model, batch, selector; execution=SerialExecution())
+sites = selectsites(model, batch, selector; execution=Execution())
+pfm = reconstruct_pfm(model, batch, selector; execution=Execution())
 
 null_result = build_null(
     models; sequences=batch, metric=:co, n_samples=2000, shuffle=true, seed=127

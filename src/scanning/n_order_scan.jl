@@ -141,7 +141,7 @@ function _scan_batch(
     model::AbstractMotifModel,
     batch::EncodedSequenceBatch,
     strands::StrandPolicy,
-    execution::ExecutionPolicy,
+    execution::Execution,
 )
     offsets = _scan_offsets(batch, model)
     data = Vector{Float32}(undef, offsets[end] - 1)
@@ -153,7 +153,7 @@ function _scan_batch(
 end
 
 function _scan_batch_both(
-    model::AbstractMotifModel, batch::EncodedSequenceBatch, execution::ExecutionPolicy
+    model::AbstractMotifModel, batch::EncodedSequenceBatch, execution::Execution
 )
     offsets = _scan_offsets(batch, model)
     forward = Vector{Float32}(undef, offsets[end] - 1)
@@ -439,15 +439,17 @@ Scan all sequences in a batch with a motif model, returning a
 
 For `BothStrands`, returns a [`StrandPair{RaggedArray{Float32}}`](@ref).
 
-Under `ThreadedExecution`, sequences are processed in parallel at the
- top level. Inner scanning kernels remain serial.
+With `Execution(n)` for `n > 1`, sequences are processed in parallel at the
+top level. Inner scanning kernels remain serial. `Execution(1)` uses the
+sequential fast path.
+
 Generic method for all directly scannable motif models.
 """
 function _scan_model_batch(
     model::AbstractMotifModel,
     batch::EncodedSequenceBatch;
     strands::StrandPolicy=ForwardOnly(),
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     _require_scannable(model)
     strands isa BothStrands && return _scan_batch_both(model, batch, execution)
@@ -460,7 +462,7 @@ function scan(
     model::AbstractMotifModel,
     batch::EncodedSequenceBatch;
     strands::StrandPolicy=ForwardOnly(),
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     validate_model(model; capability=:compare)
     return _scan_model_batch(model, batch; strands=strands, execution=execution)

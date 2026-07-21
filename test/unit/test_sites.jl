@@ -221,18 +221,16 @@ end
 
     for selector in (BestPerSequence(), ThresholdHits(Float32(-Inf)))
         serial = selectsites(
-            pwm, batch, selector; strands=BothStrands(), execution=SerialExecution()
+            pwm, batch, selector; strands=BothStrands(), execution=Execution()
         )
         threaded = selectsites(
-            pwm, batch, selector; strands=BothStrands(), execution=ThreadedExecution(4)
+            pwm, batch, selector; strands=BothStrands(), execution=Execution(4)
         )
         @test threaded == serial
     end
 
-    serial_pfm = reconstruct_pfm(pwm, batch, BestPerSequence(); execution=SerialExecution())
-    threaded_pfm = reconstruct_pfm(
-        pwm, batch, BestPerSequence(); execution=ThreadedExecution(4)
-    )
+    serial_pfm = reconstruct_pfm(pwm, batch, BestPerSequence(); execution=Execution())
+    threaded_pfm = reconstruct_pfm(pwm, batch, BestPerSequence(); execution=Execution(4))
     @test threaded_pfm == serial_pfm
 end
 

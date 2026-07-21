@@ -533,7 +533,7 @@ function _scan_bundle_for_sites(
     model::AbstractMotifModel,
     batch::EncodedSequenceBatch,
     strands::StrandPolicy,
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     if strands isa ForwardOnly
         fwd = _scan_model_batch(model, batch; strands=ForwardOnly(), execution=execution)
@@ -560,7 +560,7 @@ function _collect_hits(
     batch::EncodedSequenceBatch,
     selector::SiteSelector;
     strands::StrandPolicy=BothStrands(),
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     bundle = _scan_bundle_for_sites(model, batch, strands, execution)
     return _collect_hits_from_bundle(selector, bundle, strands)
@@ -602,7 +602,7 @@ end
 
 """
     selectsites(model::AbstractMotifModel, batch, selector;
-                strands=BothStrands(), execution=SerialExecution())
+                strands=BothStrands(), execution=Execution())
 
 Extract motif binding sites from any motif model. The `start` field in the
 returned [`SiteCollection`](@ref) is the scan position; the actual motif start
@@ -615,7 +615,7 @@ function selectsites(
     batch::EncodedSequenceBatch,
     selector::SiteSelector;
     strands::StrandPolicy=BothStrands(),
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     validate_model(model; capability=:sites)
     coll = _collect_hits(model, batch, selector; strands=strands, execution=execution)
@@ -626,7 +626,7 @@ end
 """
     reconstruct_pfm(model::AbstractMotifModel, batch, selector;
                     pseudocount=0.25f0, strands=BothStrands(),
-                    execution=SerialExecution())
+                    execution=Execution())
 
 Reconstruct a PFM from binding sites extracted from any motif model. The site
 window accounts for `site_start_offset(model)` (= `left_context(model)`) to
@@ -640,7 +640,7 @@ function reconstruct_pfm(
     selector::SiteSelector;
     pseudocount::Float32=0.25f0,
     strands::StrandPolicy=BothStrands(),
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     validate_model(model; capability=:sites)
     coll = _collect_hits(model, batch, selector; strands=strands, execution=execution)
@@ -672,7 +672,7 @@ function reconstruct_pfm(
     strands::StrandPolicy=BothStrands(),
     score_threshold::Union{Nothing,Float32}=nothing,
     top_fraction::Union{Nothing,Float64}=nothing,
-    execution::ExecutionPolicy=SerialExecution(),
+    execution::Execution=Execution(),
 )
     selector = _resolve_selector(mode; score_threshold=score_threshold)
     if top_fraction !== nothing

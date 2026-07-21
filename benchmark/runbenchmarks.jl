@@ -560,9 +560,9 @@ function bench_batch_scan!(results::Vector{BenchResult}, config::BenchConfig)
         batch = make_random_sequences(n_seqs, seq_len; seed=42)
 
         # Serial
-        scan(pwm, batch; strands=BestStrand(), execution=SerialExecution())  # warmup
+        scan(pwm, batch; strands=BestStrand(), execution=Execution())  # warmup
         b = BenchmarkTools.@benchmark scan(
-            $pwm, $batch; strands=BestStrand(), execution=SerialExecution()
+            $pwm, $batch; strands=BestStrand(), execution=Execution()
         )
         median_ser = median(b).time
         println(
@@ -593,7 +593,7 @@ function bench_batch_scan!(results::Vector{BenchResult}, config::BenchConfig)
             if nt > max_threads
                 continue
             end
-            exec = ThreadedExecution(nt)
+            exec = Execution(nt)
             scan(pwm, batch; strands=BestStrand(), execution=exec)  # warmup
             b = BenchmarkTools.@benchmark scan(
                 $pwm, $batch; strands=BestStrand(), execution=($exec)
@@ -649,9 +649,9 @@ function bench_batch_scan!(results::Vector{BenchResult}, config::BenchConfig)
         end
         batch = EncodedSequenceBatch(data, offsets)
 
-        scan(pwm, batch; strands=BestStrand(), execution=SerialExecution())  # warmup
+        scan(pwm, batch; strands=BestStrand(), execution=Execution())  # warmup
         b = BenchmarkTools.@benchmark scan(
-            $pwm, $batch; strands=BestStrand(), execution=SerialExecution()
+            $pwm, $batch; strands=BestStrand(), execution=Execution()
         )
         println(
             @sprintf(
@@ -697,9 +697,9 @@ function bench_one_to_many!(results::Vector{BenchResult}, config::BenchConfig)
         # Build target profiles
         targets = [ScoreProfile("target_$i", scan_result) for i in 1:n_targets]
 
-        policies = Tuple{String,ExecutionPolicy,Int}[("serial", SerialExecution(), 1)]
+        policies = Tuple{String,Execution,Int}[("serial", Execution(), 1)]
         if Threads.nthreads() > 1
-            push!(policies, ("threaded", ThreadedExecution(), Threads.nthreads()))
+            push!(policies, ("threaded", Execution(Threads.nthreads()), Threads.nthreads()))
         end
         for (execution_name, execution, n_threads) in policies
             compare(
@@ -1078,14 +1078,14 @@ function bench_serial_vs_threaded!(results::Vector{BenchResult}, config::BenchCo
     pwm = make_pwm(15)
     batch = make_random_sequences(500, 200; seed=42)
 
-    ser = scan(pwm, batch; strands=BestStrand(), execution=SerialExecution())
+    ser = scan(pwm, batch; strands=BestStrand(), execution=Execution())
     nthreads = max(1, Threads.nthreads())
 
     for nt in (1, 2, 4)
         if nt > nthreads
             continue
         end
-        thr = scan(pwm, batch; strands=BestStrand(), execution=ThreadedExecution(nt))
+        thr = scan(pwm, batch; strands=BestStrand(), execution=Execution(nt))
         identical = ser == thr
         status = identical ? "PASS" : "FAIL"
         println(@sprintf("  serial == threaded(%d tasks): %s", nt, status))

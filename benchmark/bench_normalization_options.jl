@@ -137,7 +137,7 @@ function scan_calibration_direct(model::AbstractMotifModel, batch::EncodedSequen
 end
 
 function scan_calibration_current(model::AbstractMotifModel, batch::EncodedSequenceBatch)
-    raw = scan(model, batch; strands=BothStrands(), execution=ThreadedExecution())
+    raw = scan(model, batch; strands=BothStrands(), execution=Execution(Threads.nthreads()))
     return Mimosa._empirical_workspace(raw)
 end
 
@@ -373,7 +373,7 @@ function prepare_exact_variant(
     table = fit_sorted_table!(sorted)
     return (
         table=table,
-        bundle=normalize_bundle(table, foreground; execution=ThreadedExecution()),
+        bundle=normalize_bundle(table, foreground; execution=Execution(Threads.nthreads())),
     )
 end
 
@@ -486,7 +486,7 @@ function main()
 
     exact_table = Mimosa._fit_empirical_table!(copy(direct))
     foreground_raw = scan(
-        model, foreground; strands=BothStrands(), execution=ThreadedExecution()
+        model, foreground; strands=BothStrands(), execution=Execution(Threads.nthreads())
     )
     foreground_values = vcat(foreground_raw.forward.data, foreground_raw.reverse.data)
     directory = build_directory(exact_table.scores, DIRECTORY_BITS)
@@ -500,7 +500,7 @@ function main()
         "current: sortperm + linear merge (both strands)",
         median_measure(
             () -> normalize_bundle(
-                exact_table, foreground_raw; execution=ThreadedExecution()
+                exact_table, foreground_raw; execution=Execution(Threads.nthreads())
             ),
         ),
     )
@@ -610,7 +610,7 @@ function main()
                 background=background,
                 min_logfpr=threshold,
                 normalization=Mimosa.EmpiricalLogTail(),
-                execution=ThreadedExecution(),
+                execution=Execution(Threads.nthreads()),
             )
             compared = compare_variants(
                 exact_bundle, hybrid_prepared.bundle, query, threshold
