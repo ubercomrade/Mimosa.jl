@@ -24,6 +24,27 @@ end
     @test_throws Mimosa.CLIError Mimosa._execution(parsed)
 end
 
+@testset "CLI progress renderer" begin
+    io = IOBuffer()
+    progress = ProgressBar(io; width=5, refresh_seconds=0)
+    progress((; stage=:prepare, current=0, total=2, label=""))
+    progress((; stage=:prepare, current=1, total=2, label="m1"))
+    progress((; stage=:prepare, current=2, total=2, label="m2"))
+    progress((; stage=:null, current=0, total=3, label=""))
+    progress((; stage=:null, current=3, total=3, label="m3"))
+    output = String(take!(io))
+    @test occursin("Preparing models", output)
+    @test occursin("Building null", output)
+    @test occursin("2/2", output)
+    @test occursin("3/3", output)
+    @test !progress.active
+
+    parsed = Mimosa.CLIParsed("build-null")
+    push!(parsed.flags, "quiet")
+    @test Mimosa._cli_progress(parsed) === nothing
+    @test !Mimosa._is_terminal_output(IOBuffer())
+end
+
 @testset "_parallel_chunks" begin
     for execution in (Execution(), Execution(4))
         visits = zeros(Int, 37)

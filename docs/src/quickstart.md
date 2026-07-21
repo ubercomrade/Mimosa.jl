@@ -133,6 +133,24 @@ Use the same `execution` setting for `build_null` and one-to-many comparisons.
 Targets remain serial while each comparison uses threaded computational
 kernels.
 
+Long-running library calls can report progress without writing to the terminal
+themselves:
+
+```julia
+results = compare(
+    prepared_query,
+    targets;
+    execution=Execution(4),
+    on_progress=ProgressBar(),
+)
+```
+
+`build_null` uses the same callback with `:prepare` and `:null` stages. The CLI
+renders these events as a throttled progress bar on `stderr` when attached to a
+terminal. `--quiet` disables it, and JSON output remains isolated on `stdout`.
+Custom callbacks can inspect the `stage`, `current`, `total`, and `label`
+fields of each event.
+
 ```julia
 scores = scan(
     model,

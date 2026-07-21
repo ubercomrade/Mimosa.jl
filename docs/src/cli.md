@@ -98,6 +98,10 @@ stable serial order; `--threads` parallelizes scanning, Hybrid normalization,
 anchor collection, and profile alignment within each comparison. It is the
 only CLI control for Mimosa's execution task count.
 
+`build-null` displays preparation and sampling progress on `stderr` when it is
+connected to a terminal. Updates are throttled to avoid affecting computation.
+`--quiet` disables the progress bar. Machine-readable JSON remains on `stdout`.
+
 ## Process Contract
 
 | Exit code | Meaning |

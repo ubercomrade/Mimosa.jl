@@ -102,6 +102,12 @@ Targets and null pairs retain stable serial order; scanning, Hybrid
 normalization, anchor collection, and profile alignment use the requested
 threads within each comparison.
 
+One-to-many `compare` methods and `build_null` also accept
+`on_progress=callback`. The callback receives a named tuple with `stage`,
+`current`, `total`, and `label` fields. Passing no callback, the default, does
+not perform progress-related I/O. Pass `on_progress=ProgressBar()` for the
+built-in throttled terminal renderer.
+
 ## Compare motif models
 
 Comparison requires the same `EncodedSequenceBatch` for both models:
@@ -335,5 +341,6 @@ annotate_results
 to_dict
 to_json
 Execution
+ProgressBar
 MimosaError
 ```

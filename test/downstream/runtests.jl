@@ -53,6 +53,7 @@ const EXAMPLES = joinpath(REPO_ROOT, "examples")
 
     # Execution control
     @test isdefined(Mimosa, :Execution)
+    @test isdefined(Mimosa, :ProgressBar)
     @test !isdefined(Mimosa, :SerialExecution)
     @test !isdefined(Mimosa, :ThreadedExecution)
 

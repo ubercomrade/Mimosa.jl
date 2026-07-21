@@ -1061,6 +1061,8 @@ targets, reusing the query's normalized bundle and pre-collected anchors.
 Returns a `Vector{ComparisonResult}`.
 
 Each target is prepared (normalized, anchors collected) independently.
+Pass `on_progress=callback` to receive `(stage, current, total, label)` events
+after each target; no callback is invoked by default.
 """
 function compare(
     query::PreparedProfile,
@@ -1072,6 +1074,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
     cache=nothing,
+    on_progress=nothing,
 )
     threshold = min_logfpr === nothing ? query.min_logfpr : Float32(min_logfpr)
     threshold == query.min_logfpr ||
@@ -1082,7 +1085,9 @@ function compare(
     )
     results = Vector{ComparisonResult}(undef, length(targets))
     isempty(targets) && return results
-    for i in eachindex(targets)
+    total = length(targets)
+    _notify_progress(on_progress, :compare, 0, total, "")
+    for (current, i) in enumerate(eachindex(targets))
         target = targets[i]
         prepared_target = prepare_profile(
             target;
@@ -1108,6 +1113,7 @@ function compare(
             metric_str,
             n_sites,
         )
+        _notify_progress(on_progress, :compare, current, total, modelname(target))
     end
     return results
 end
@@ -1120,6 +1126,7 @@ function compare(
     search_range::Int=10,
     window_radius::Int=10,
     realign_window::Int=3,
+    on_progress=nothing,
 )
     config = ProfileConfig(;
         metric=_resolve_profile_metric(metric),
@@ -1130,7 +1137,9 @@ function compare(
     )
     results = Vector{ComparisonResult}(undef, length(targets))
     isempty(targets) && return results
-    for i in eachindex(targets)
+    total = length(targets)
+    _notify_progress(on_progress, :compare, 0, total, "")
+    for (current, i) in enumerate(eachindex(targets))
         target = targets[i]
         query.min_logfpr == target.min_logfpr ||
             throw(ArgumentError("prepared profiles use different min_logfpr thresholds."))
@@ -1149,6 +1158,7 @@ function compare(
             metric_str,
             n_sites,
         )
+        _notify_progress(on_progress, :compare, current, total, modelname(target))
     end
     return results
 end
@@ -1281,6 +1291,7 @@ function compare(
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     cache=nothing,
+    on_progress=nothing,
 )
     threshold = min_logfpr === nothing ? query.min_logfpr : Float32(min_logfpr)
     threshold == query.min_logfpr ||
@@ -1294,7 +1305,9 @@ function compare(
     )
     results = Vector{ComparisonResult}(undef, length(targets))
     isempty(targets) && return results
-    for i in eachindex(targets)
+    total = length(targets)
+    _notify_progress(on_progress, :compare, 0, total, "")
+    for (current, i) in enumerate(eachindex(targets))
         target = targets[i]
         prepared_target = prepare_profile(
             target,
@@ -1322,6 +1335,7 @@ function compare(
             metric_str,
             n_sites,
         )
+        _notify_progress(on_progress, :compare, current, total, modelname(target))
     end
     return results
 end
@@ -1345,6 +1359,7 @@ function compare(
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
     cache=nothing,
+    on_progress=nothing,
 )
     prepared_query = prepare_profile(
         query, sequences; background, min_logfpr, normalization, execution, cache
@@ -1360,5 +1375,6 @@ function compare(
         realign_window,
         background,
         cache,
+        on_progress,
     )
 end

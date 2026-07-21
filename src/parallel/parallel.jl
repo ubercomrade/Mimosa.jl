@@ -32,6 +32,15 @@ function Base.show(io::IO, execution::Execution)
     return print(io, "Execution(ntasks=$(execution.ntasks))")
 end
 
+@inline function _notify_progress(::Nothing, stage::Symbol, current::Int, total::Int, label)
+    return nothing
+end
+
+@inline function _notify_progress(callback, stage::Symbol, current::Int, total::Int, label)
+    callback((; stage, current, total, label=String(label)))
+    return nothing
+end
+
 function _effective_ntasks(::Execution{N}, n::Int) where {N}
     return min(N, n, Threads.nthreads())
 end

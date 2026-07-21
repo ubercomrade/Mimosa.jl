@@ -277,12 +277,24 @@ end
     @test prepared_result.orientation == direct.orientation
 
     # One-to-many comparison
-    results = compare(prepared, [sp2, sp3]; metric=:co, search_range=3, window_radius=2)
+    progress_events = NamedTuple[]
+    results = compare(
+        prepared,
+        [sp2, sp3];
+        metric=:co,
+        search_range=3,
+        window_radius=2,
+        on_progress=event -> push!(progress_events, event),
+    )
     @test length(results) == 2
     @test results[1].score ≈ prepared_result.score atol = 1e-5
     @test results[1].offset == prepared_result.offset
     @test results[2].query == "query"
     @test results[2].target == "target2"
+    @test [event.stage for event in progress_events] == fill(:compare, 3)
+    @test [event.current for event in progress_events] == [0, 1, 2]
+    @test [event.total for event in progress_events] == [2, 2, 2]
+    @test [event.label for event in progress_events] == ["", "target", "target2"]
 
     thresholded = prepare_profile(sp1; min_logfpr=0.25)
     threshold_serial = compare(thresholded, sp2; search_range=3, window_radius=2)
@@ -345,6 +357,7 @@ end
     @test [r.target for r in serial] == ["target1", "target2"]
     @test prepared == serial
 
+    threaded_progress = NamedTuple[]
     threaded = compare(
         query,
         targets,
@@ -354,8 +367,10 @@ end
         window_radius=1,
         realign_window=1,
         execution=Execution(4),
+        on_progress=event -> push!(threaded_progress, event),
     )
     @test threaded == serial
+    @test [event.current for event in threaded_progress] == [0, 1, 2]
 
     scan_threaded = compare(
         query,

@@ -113,6 +113,16 @@ function _execution(parsed::CLIParsed)
     return Execution(requested)
 end
 
+function _is_terminal_output(io::IO)
+    return io isa Base.TTY || get(io, :color, false)
+end
+
+function _cli_progress(parsed::CLIParsed)
+    "quiet" in parsed.flags && return nothing
+    _is_terminal_output(stderr) || return nothing
+    return ProgressBar(stderr)
+end
+
 # ── JSON output ─────────────────────────────────────────────────────────────
 
 function _json_value(v::Nothing)
@@ -567,20 +577,27 @@ function _run_build_null(parsed::CLIParsed)
     else
         first(readsequences(fasta))
     end
-    result = build_null(
-        models;
-        metric=metric,
-        n_samples=n_samples,
-        shuffle=shuffle,
-        seed=seed,
-        execution=execution,
-        sequences=sequences,
-        search_range=search_range,
-        window_radius=window_radius,
-        realign_window=realign_window,
-        min_logfpr=min_logfpr,
-        normalization=normalization,
-    )
+    progress = _cli_progress(parsed)
+    result = try
+        build_null(
+            models;
+            metric=metric,
+            n_samples=n_samples,
+            shuffle=shuffle,
+            seed=seed,
+            execution=execution,
+            sequences=sequences,
+            search_range=search_range,
+            window_radius=window_radius,
+            realign_window=realign_window,
+            min_logfpr=min_logfpr,
+            normalization=normalization,
+            on_progress=progress,
+        )
+    catch
+        _finish_progress!(progress)
+        rethrow()
+    end
 
     # Save null distribution
     savenull(output_path, result.distribution)

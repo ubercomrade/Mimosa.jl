@@ -14,6 +14,7 @@ module Mimosa
 
 include("errors.jl")
 include("parallel/parallel.jl")
+include("progress.jl")
 include("models/models.jl")
 include("sequences/sequences.jl")
 include("scanning/scanning.jl")
@@ -174,8 +175,8 @@ export GEVFit,
     loadnull,
     NULL_FORMAT_VERSION
 
-# Execution control
-export Execution
+# Execution and progress control
+export Execution, ProgressBar
 
 # Cache exports
 export Cache,

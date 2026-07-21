@@ -191,6 +191,8 @@ distribution.
 - `seed`: random seed for reproducible sampling and shuffling.
 - `execution`: [`Execution`](@ref) for scanning, normalization, anchor
   collection, and profile alignment within each comparison.
+- `on_progress`: optional callback receiving `(stage, current, total, label)`
+  events. Stages are `:prepare` and `:null`.
 
 Returns a [`NullBuildResult`](@ref).
 
@@ -212,6 +214,7 @@ function build_null(
     realign_window::Int=3,
     min_logfpr::Real=0.0,
     normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
+    on_progress=nothing,
 )
     config = NullBuildConfig(;
         metric=metric, n_samples=n_samples, shuffle=shuffle, seed=seed
@@ -227,6 +230,7 @@ function build_null(
         realign_window=realign_window,
         min_logfpr=min_logfpr,
         normalization=normalization,
+        on_progress=on_progress,
     )
 end
 
@@ -241,6 +245,7 @@ function build_null(
     realign_window::Int=3,
     min_logfpr::Real=0.0,
     normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
+    on_progress=nothing,
 )
     length(models) >= 2 ||
         throw(ArgumentError("at least two models are required for null construction."))
@@ -263,7 +268,9 @@ function build_null(
     prepared = Vector{Union{Nothing,PreparedProfile}}(undef, length(models))
     fill!(prepared, nothing)
     reusable = findall(model -> !config.shuffle || !(model isa PWM), models)
-    for model_index in reusable
+    n_reusable = length(reusable)
+    n_reusable > 0 && _notify_progress(on_progress, :prepare, 0, n_reusable, "")
+    for (current, model_index) in enumerate(reusable)
         prepared[model_index] = prepare_profile(
             models[model_index],
             sequences;
@@ -272,11 +279,15 @@ function build_null(
             normalization=normalization,
             execution=execution,
         )
+        _notify_progress(
+            on_progress, :prepare, current, n_reusable, modelname(models[model_index])
+        )
     end
 
     work_items = _null_work_items(length(models), config)
     raw_scores = Vector{Float64}(undef, config.n_samples)
     pairs = Vector{NullPair}(undef, config.n_samples)
+    _notify_progress(on_progress, :null, 0, config.n_samples, "")
     for i in 1:config.n_samples
         item = work_items[i]
         query = models[item.query]
@@ -317,6 +328,7 @@ function build_null(
         score = Float64(result.score)
         raw_scores[i] = score
         pairs[i] = NullPair(String(modelname(query)), String(modelname(target)), score)
+        _notify_progress(on_progress, :null, i, config.n_samples, modelname(target))
     end
 
     fit_result = fit_gev(raw_scores)

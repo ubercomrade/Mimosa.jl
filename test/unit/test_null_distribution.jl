@@ -61,8 +61,15 @@ end
     sequences = EncodedSequenceBatch([
         encode_sequence("ACGTACGT"), encode_sequence("TGCATGCA")
     ])
+    progress_events = NamedTuple[]
     result = build_null(
-        models; sequences=sequences, metric=:co, n_samples=12, shuffle=true, seed=9
+        models;
+        sequences=sequences,
+        metric=:co,
+        n_samples=12,
+        shuffle=true,
+        seed=9,
+        on_progress=event -> push!(progress_events, event),
     )
 
     dist = result.distribution
@@ -77,6 +84,28 @@ end
     @test all(pair.query != pair.target for pair in dist.pairs)
     @test dist.sequence_fingerprint == sequence_fingerprint(sequences)
     @test dist.model_collection_fingerprint == model_collection_fingerprint(models)
+    @test all(event.stage === :null for event in progress_events)
+    @test [event.current for event in progress_events] == collect(0:12)
+    @test all(event.total == 12 for event in progress_events)
+
+    staged_events = NamedTuple[]
+    build_null(
+        models;
+        sequences=sequences,
+        metric=:co,
+        n_samples=2,
+        shuffle=false,
+        seed=9,
+        on_progress=event -> push!(staged_events, event),
+    )
+    @test [(event.stage, event.current, event.total) for event in staged_events] == [
+        (:prepare, 0, 2),
+        (:prepare, 1, 2),
+        (:prepare, 2, 2),
+        (:null, 0, 2),
+        (:null, 1, 2),
+        (:null, 2, 2),
+    ]
 
     repeated = build_null(
         models; sequences=sequences, metric=:co, n_samples=12, shuffle=true, seed=9
