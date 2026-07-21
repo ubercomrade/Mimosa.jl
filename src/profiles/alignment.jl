@@ -773,11 +773,12 @@ Fields:
 - `bundle::StrandPair{T}`: normalized scores.
 - `anchors::Tuple{AnchorCSR,AnchorCSR}`: `(forward, reverse)` anchor CSRs.
 """
-struct PreparedProfile{T}
+struct PreparedProfile{T,S<:AbstractNormalizationStrategy}
     name::String
     bundle::T
     anchors::Tuple{AnchorCSR,AnchorCSR}
     min_logfpr::Float32
+    normalization::S
 end
 
 """
@@ -793,7 +794,8 @@ function PreparedProfile(
     bundle::StrandPair{<:RaggedArray{Float32}},
     anchors::Tuple{AnchorCSR,AnchorCSR},
     min_logfpr::Float32,
-)
+    normalization::S=EmpiricalLogTail(),
+) where {S<:AbstractNormalizationStrategy}
     threshold = min_logfpr
     isfinite(threshold) || throw(ArgumentError("min_logfpr must be finite."))
     n_rows = nrows(bundle.forward)
@@ -812,7 +814,7 @@ function PreparedProfile(
             end
         end
     end
-    return PreparedProfile{typeof(bundle)}(name, bundle, anchors, threshold)
+    return PreparedProfile{typeof(bundle),S}(name, bundle, anchors, threshold, normalization)
 end
 
 function PreparedProfile(
@@ -855,17 +857,18 @@ Keyword arguments:
 function prepare_profile(
     model::ScoreProfile;
     min_logfpr::Real=0.0,
+    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
     scan_execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
     threshold = Float32(min_logfpr)
     isfinite(threshold) || throw(ArgumentError("min_logfpr must be finite."))
-    key, cached = _cached_prepared_profile(cache, model, nothing, nothing, threshold)
+    key, cached = _cached_prepared_profile(cache, model, nothing, nothing, threshold, normalization)
     cached !== nothing && return cached
     raw = StrandPair(model.scores, model.scores)
-    _, norm_bundle = _fit_normalize_empirical(raw; scan_execution=scan_execution)
+    _, norm_bundle = _fit_normalize(normalization, raw; tail_logfpr=threshold, scan_execution=scan_execution)
     anchors = _collect_both_anchors(norm_bundle, threshold)
-    prepared = PreparedProfile(String(modelname(model)), norm_bundle, anchors, threshold)
+    prepared = PreparedProfile(String(modelname(model)), norm_bundle, anchors, threshold, normalization)
     return _store_prepared_profile!(cache, key, prepared)
 end
 
@@ -884,23 +887,24 @@ function prepare_profile(
     sequences::EncodedSequenceBatch;
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     min_logfpr::Real=0.0,
+    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
     scan_execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
     threshold = Float32(min_logfpr)
     isfinite(threshold) || throw(ArgumentError("min_logfpr must be finite."))
     validate_model(model; capability=:compare)
-    key, cached = _cached_prepared_profile(cache, model, sequences, background, threshold)
+    key, cached = _cached_prepared_profile(cache, model, sequences, background, threshold, normalization)
     cached !== nothing && return cached
     raw = _scan_model_batch(model, sequences; strands=BothStrands(), execution=scan_execution)
     bg = background === nothing ? sequences : background
     norm_bundle = if bg === sequences
-        last(_fit_normalize_empirical(raw; scan_execution=scan_execution))
+        last(_fit_normalize(normalization, raw; tail_logfpr=threshold, scan_execution=scan_execution))
     else
-        _normalize_against_background(model, raw, bg, scan_execution)
+        _normalize_against_background(model, raw, bg, scan_execution, normalization, threshold)
     end
     anchors = _collect_both_anchors(norm_bundle, threshold)
-    prepared = PreparedProfile(String(modelname(model)), norm_bundle, anchors, threshold)
+    prepared = PreparedProfile(String(modelname(model)), norm_bundle, anchors, threshold, normalization)
     return _store_prepared_profile!(cache, key, prepared)
 end
 
@@ -911,9 +915,11 @@ function _normalize_against_background(
     raw::StrandPair{<:RaggedArray{Float32}},
     background::EncodedSequenceBatch,
     scan_execution::ExecutionPolicy,
+    normalization::AbstractNormalizationStrategy,
+    tail_logfpr::Float32,
 )
     bg_raw = _scan_model_batch(model, background; strands=BothStrands(), execution=scan_execution)
-    return last(_fit_normalize_empirical(raw; calibration=bg_raw, scan_execution=scan_execution))
+    return last(_fit_normalize(normalization, raw; calibration=bg_raw, tail_logfpr, scan_execution=scan_execution))
 end
 
 # ── PreparedProfile compare methods ────────────────────────────────────────────
@@ -945,7 +951,7 @@ function compare(
     threshold = min_logfpr === nothing ? query.min_logfpr : Float32(min_logfpr)
     threshold == query.min_logfpr ||
         throw(ArgumentError("min_logfpr differs from the prepared query threshold."))
-    prepared_target = prepare_profile(target; min_logfpr=threshold, cache=cache)
+    prepared_target = prepare_profile(target; min_logfpr=threshold, normalization=query.normalization, cache=cache)
     config = ProfileConfig(;
         metric=m,
         search_range=search_range,
@@ -971,6 +977,8 @@ function compare(
 )
     query.min_logfpr == target.min_logfpr ||
         throw(ArgumentError("prepared profiles use different min_logfpr thresholds."))
+    query.normalization == target.normalization ||
+        throw(ArgumentError("prepared profiles use different normalization strategies."))
     config = ProfileConfig(;
         metric=_resolve_profile_metric(metric),
         search_range,
@@ -1003,6 +1011,7 @@ function compare(
     search_range::Int=10,
     window_radius::Int=10,
     realign_window::Int=3,
+    normalization::Union{Nothing,AbstractNormalizationStrategy}=nothing,
     min_logfpr::Union{Nothing,Real}=nothing,
     cache=nothing,
 )
@@ -1017,7 +1026,9 @@ function compare(
     isempty(targets) && return results
     _parallel_for(outer_execution, length(targets)) do i
         target = targets[i]
-        prepared_target = prepare_profile(target; min_logfpr=threshold, cache=cache)
+        strategy = normalization === nothing ? query.normalization : normalization
+        strategy == query.normalization || throw(ArgumentError("normalization differs from the prepared query strategy."))
+        prepared_target = prepare_profile(target; min_logfpr=threshold, normalization=strategy, cache=cache)
         score, shift, orientation, n_sites, metric_str = profile_compare(
             query.bundle, query.anchors, prepared_target.bundle, prepared_target.anchors, config
         )
@@ -1042,6 +1053,7 @@ function compare(
     search_range::Int=10,
     window_radius::Int=10,
     realign_window::Int=3,
+    normalization::Union{Nothing,AbstractNormalizationStrategy}=nothing,
 )
     config = ProfileConfig(;
         metric=_resolve_profile_metric(metric),
@@ -1056,6 +1068,8 @@ function compare(
         target = targets[i]
         query.min_logfpr == target.min_logfpr ||
             throw(ArgumentError("prepared profiles use different min_logfpr thresholds."))
+        query.normalization == target.normalization ||
+            throw(ArgumentError("prepared profiles use different normalization strategies."))
         score, shift, orientation, n_sites, metric_str = profile_compare(
             query.bundle, query.anchors, target.bundle, target.anchors, config
         )
@@ -1091,6 +1105,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
+    normalization::Union{Nothing,AbstractNormalizationStrategy}=nothing,
     scan_execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
@@ -1101,6 +1116,7 @@ function compare(
     prepared_target = prepare_profile(
         target, sequences;
         background=background,
+        normalization=query.normalization,
         min_logfpr=threshold,
         scan_execution=scan_execution,
         cache=cache,
@@ -1139,6 +1155,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
+    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
     scan_execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
@@ -1186,6 +1203,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
+    normalization::Union{Nothing,AbstractNormalizationStrategy}=nothing,
     cache=nothing,
 )
     _validate_execution_levels(outer_execution, scan_execution)
@@ -1207,6 +1225,7 @@ function compare(
             target, sequences;
             background=background,
             min_logfpr=threshold,
+            normalization=query.normalization,
             scan_execution=scan_execution,
             cache=cache,
         )
@@ -1244,11 +1263,12 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Real=0.0,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
+    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
     cache=nothing,
 )
     _validate_execution_levels(outer_execution, scan_execution)
     prepared_query = prepare_profile(
-        query, sequences; background, min_logfpr, scan_execution, cache
+        query, sequences; background, min_logfpr, normalization, scan_execution, cache
     )
     return compare(
         prepared_query,
@@ -1261,6 +1281,7 @@ function compare(
         window_radius,
         realign_window,
         background,
+        normalization,
         cache,
     )
 end

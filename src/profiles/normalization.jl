@@ -21,9 +21,33 @@ Empirical `-log10(tail)` normalization strategy.
 Fit from a flat sample of scores, then transform score profiles through
 the lookup table. Matches Python's `build_score_log_tail_table`.
 """
-struct EmpiricalLogTail end
+abstract type AbstractNormalizationStrategy end
 
-function _fit_empirical_table!(workspace::Vector{Float32})
+struct EmpiricalLogTail <: AbstractNormalizationStrategy end
+
+struct HybridEmpiricalLogTail <: AbstractNormalizationStrategy
+    bins::Int
+
+    function HybridEmpiricalLogTail(bins::Integer=65_536)
+        b = Int(bins)
+        b >= 256 && b <= 1_048_576 ||
+            throw(ArgumentError("hybrid normalization bins must be in 256:1_048_576."))
+        ispow2(b) || throw(ArgumentError("hybrid normalization bins must be a power of two."))
+        return new(b)
+    end
+end
+
+HybridEmpiricalLogTail(; bins::Integer=65_536) = HybridEmpiricalLogTail(bins)
+
+function normalization_fingerprint(::EmpiricalLogTail)
+    return "empirical-log-tail-v1"
+end
+
+function normalization_fingerprint(s::HybridEmpiricalLogTail)
+    return "hybrid-log-tail-v2;bins=$(s.bins)"
+end
+
+function _fit_empirical_table!(workspace::Vector{Float32}; total_n::Int=length(workspace))
     n = length(workspace)
     n == 0 && return LogTailTable(Float32[0.0f0], Float32[0.0f0])
 
@@ -39,7 +63,7 @@ function _fit_empirical_table!(workspace::Vector{Float32})
         while j <= n && workspace[j] == score
             j += 1
         end
-        value = Float32(-log10(Float64(j - 1) / Float64(n)))
+        value = Float32(-log10(Float64(j - 1) / Float64(total_n)))
         log_tail[n_unique] = value
         k = j
     end
@@ -60,8 +84,86 @@ Algorithm (matching Python's `build_score_log_tail_table`):
 4. Transform to `-log10(tail_probability)`.
 """
 function fit(::EmpiricalLogTail, scores::AbstractVector{T}) where {T<:Real}
-    return _fit_empirical_table!(Float32.(scores))
+    values = Float32.(scores)
+    all(isfinite, values) || throw(ArgumentError("normalization scores must be finite."))
+    return _fit_empirical_table!(values)
 end
+
+struct HybridLogTailTable
+    minimum::Float32
+    bin_width::Float32
+    log_tail::Vector{Float32}
+    exact_tail::LogTailTable
+end
+
+mutable struct HybridNormalizationWorkspace
+    counts::Matrix{UInt32}
+    chunk_minima::Vector{Float32}
+    chunk_maxima::Vector{Float32}
+    tail_counts::Vector{Int}
+    tail_offsets::Vector{Int}
+    exact_tail::Vector{Float32}
+end
+
+function HybridNormalizationWorkspace(bins::Int, nchunks::Int)
+    return HybridNormalizationWorkspace(
+        zeros(UInt32, bins, nchunks), fill(Inf32, nchunks), fill(-Inf32, nchunks),
+        zeros(Int, nchunks), zeros(Int, nchunks + 1), Float32[]
+    )
+end
+
+function fit(strategy::HybridEmpiricalLogTail, scores::AbstractVector{T};
+             tail_logfpr::Real=0.0,
+             scan_execution::ExecutionPolicy=SerialExecution()) where {T<:Real}
+    values = Float32.(scores)
+    all(isfinite, values) || throw(ArgumentError("normalization scores must be finite."))
+    n = length(values)
+    n == 0 && return HybridLogTailTable(0.0f0, 1.0f0, Float32[0.0f0],
+                                        LogTailTable(Float32[0.0f0], Float32[0.0f0]))
+    lo, hi = minimum(values), maximum(values)
+    width = lo == hi ? 1.0f0 : (hi - lo) / Float32(strategy.bins)
+    bins = lo == hi ? 1 : strategy.bins
+    nchunks = scan_execution isa ThreadedExecution ? _effective_ntasks(scan_execution, n) : 1
+    ws = HybridNormalizationWorkspace(bins, nchunks)
+    _parallel_for(scan_execution, nchunks) do chunk
+        first = fld((chunk - 1) * n, nchunks) + 1
+        last = fld(chunk * n, nchunks)
+        if first <= last
+            @inbounds for i in first:last
+                index = lo == hi ? 1 : min(bins, max(1, floor(Int, (values[i] - lo) / width) + 1))
+                ws.counts[index, chunk] += UInt32(1)
+            end
+        end
+    end
+    counts = vec(sum(ws.counts; dims=2))
+    cumulative = zeros(UInt64, bins)
+    running = UInt64(0)
+    @inbounds for i in bins:-1:1
+        running += counts[i]
+        cumulative[i] = running
+    end
+    isfinite(tail_logfpr) && tail_logfpr >= 0 ||
+        throw(ArgumentError("tail_logfpr must be finite and non-negative."))
+    cutoff_count = max(UInt64(1), ceil(UInt64, Float64(n) * 10.0 ^ (-Float64(tail_logfpr))))
+    # `cumulative` is indexed from low to high scores and decreases with the
+    # index; choose the highest bin whose tail still reaches the threshold.
+    cutoff_bin = findlast(>=(cutoff_count), cumulative)
+    cutoff_bin = something(cutoff_bin, 1)
+    tail_values = Float32[]
+    @inbounds for i in eachindex(values)
+        index = lo == hi ? 1 : min(bins, max(1, floor(Int, (values[i] - lo) / width) + 1))
+        index >= cutoff_bin && push!(tail_values, values[i])
+    end
+    exact = _fit_empirical_table!(sort!(tail_values; rev=true); total_n=n)
+    histogram_log_tail = Vector{Float32}(undef, bins)
+    @inbounds for i in 1:bins
+        histogram_log_tail[i] = Float32(-log10(Float64(cumulative[i]) / n))
+    end
+    return HybridLogTailTable(lo, width, histogram_log_tail, exact)
+end
+
+fit(strategy::HybridEmpiricalLogTail, scores::AbstractVector{T}) where {T<:Real} =
+    fit(strategy, scores; scan_execution=SerialExecution())
 
 function _empirical_workspace(bundle::StrandPair{<:RaggedArray{Float32}})
     fwd = bundle.forward.data
@@ -88,6 +190,25 @@ function _fit_normalize_empirical(
 )
     table = _fit_empirical_table!(_empirical_workspace(calibration))
     return table, normalize_bundle(table, raw; scan_execution=scan_execution)
+end
+
+function _fit_normalize(
+    strategy::EmpiricalLogTail, raw::StrandPair{<:RaggedArray{Float32}};
+    calibration::StrandPair{<:RaggedArray{Float32}}=raw,
+    tail_logfpr::Real=0.0,
+    scan_execution::ExecutionPolicy=SerialExecution(),
+)
+    return _fit_normalize_empirical(raw; calibration, scan_execution)
+end
+
+function _fit_normalize(
+    strategy::HybridEmpiricalLogTail, raw::StrandPair{<:RaggedArray{Float32}};
+    calibration::StrandPair{<:RaggedArray{Float32}}=raw,
+    tail_logfpr::Real=0.0,
+    scan_execution::ExecutionPolicy=SerialExecution(),
+)
+    table = fit(strategy, _empirical_workspace(calibration); tail_logfpr, scan_execution)
+    return table, normalize_bundle(table, raw; scan_execution)
 end
 
 """
@@ -130,6 +251,30 @@ Map a single score to its empirical log-tail value via descending binary search.
 function lookup_score(table::LogTailTable, score::Float32)
     idx = _lower_bound_desc(table.scores, score)
     return table.log_tail[idx]
+end
+
+function lookup_score(table::HybridLogTailTable, score::Float32)
+    if !isempty(table.exact_tail.scores) && score >= table.exact_tail.scores[end]
+        return lookup_score(table.exact_tail, score)
+    end
+    isempty(table.log_tail) && return 0.0f0
+    index = table.bin_width == 0 ? 1 : floor(Int, (score - table.minimum) / table.bin_width) + 1
+    return table.log_tail[clamp(index, 1, length(table.log_tail))]
+end
+
+function transform_scores(table::HybridLogTailTable, scores::RaggedArray{Float32};
+                          scan_execution::ExecutionPolicy=SerialExecution())
+    n = length(scores.data)
+    out = Vector{Float32}(undef, n)
+    nchunks = scan_execution isa ThreadedExecution ? _effective_ntasks(scan_execution, max(n, 1)) : 1
+    _parallel_for(scan_execution, nchunks) do chunk
+        first = fld((chunk - 1) * n, nchunks) + 1
+        last = fld(chunk * n, nchunks)
+        @inbounds for i in first:last
+            out[i] = lookup_score(table, scores.data[i])
+        end
+    end
+    return RaggedArray(out, copy(scores.offsets))
 end
 
 """
@@ -222,6 +367,14 @@ function normalize_bundle(
     bundle.forward === bundle.reverse && return StrandPair(fwd, fwd)
     rev = transform_scores(table, bundle.reverse; scan_execution=scan_execution)
     return StrandPair(fwd, rev)
+end
+
+function normalize_bundle(table::HybridLogTailTable,
+                          bundle::StrandPair{<:RaggedArray{Float32}};
+                          scan_execution::ExecutionPolicy=SerialExecution())
+    fwd = transform_scores(table, bundle.forward; scan_execution)
+    bundle.forward === bundle.reverse && return StrandPair(fwd, fwd)
+    return StrandPair(fwd, transform_scores(table, bundle.reverse; scan_execution))
 end
 
 """

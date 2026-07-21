@@ -42,7 +42,7 @@ const ALGORITHM_VERSIONS = Dict{String,String}(
 # This format is intentionally independent of Julia's Serialization stdlib. Cache
 # entries can therefore be validated structurally and remain usable across Julia
 # sessions that use the same Mimosa cache format.
-const PREPARED_PROFILE_CACHE_FORMAT_VERSION = 1
+const PREPARED_PROFILE_CACHE_FORMAT_VERSION = 2
 const _PREPARED_PROFILE_CACHE_MAGIC = UInt8[
     0x4d, 0x49, 0x4d, 0x4f, 0x53, 0x41, 0x2d, 0x50, 0x52, 0x45, 0x50, 0x2d, 0x31,
 ]
@@ -296,6 +296,7 @@ function prepared_profile_cache_key(
     sequences::Union{Nothing,EncodedSequenceBatch}=nothing;
     background::Union{Nothing,EncodedSequenceBatch}=nothing,
     min_logfpr::Real=0.0f0,
+    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
 )
     is_motif = source isa AbstractMotifModel
     is_motif && sequences === nothing && throw(
@@ -317,6 +318,7 @@ function prepared_profile_cache_key(
         sequence_part,
         background_part,
         "min_logfpr=$(bitstring(threshold))",
+        "normalization=$(normalization_fingerprint(normalization))",
     )
 end
 
@@ -326,10 +328,11 @@ function _cached_prepared_profile(
     sequences::Union{Nothing,EncodedSequenceBatch},
     background::Union{Nothing,EncodedSequenceBatch},
     threshold::Float32,
+    normalization::AbstractNormalizationStrategy,
 )
     (cache === nothing || !cache.enabled) && return (nothing, nothing)
     key = prepared_profile_cache_key(
-        cache, source, sequences; background=background, min_logfpr=threshold
+        cache, source, sequences; background=background, min_logfpr=threshold, normalization
     )
     data = cache_get(cache, key)
     data === nothing && return (key, nothing)
@@ -347,6 +350,7 @@ function _store_prepared_profile!(
         metadata=Dict(
             "algorithm" => "prepared_profile",
             "prepared_profile_format_version" => PREPARED_PROFILE_CACHE_FORMAT_VERSION,
+            "normalization" => normalization_fingerprint(profile.normalization),
         ),
     )
     return profile
@@ -358,6 +362,7 @@ function _encode_prepared_profile(profile::PreparedProfile)
     _write_cache_u64!(io, PREPARED_PROFILE_CACHE_FORMAT_VERSION)
     _write_cache_string!(io, profile.name)
     _write_cache_f32!(io, profile.min_logfpr)
+    _write_cache_string!(io, normalization_fingerprint(profile.normalization))
     _write_cache_ragged!(io, profile.bundle.forward)
     _write_cache_ragged!(io, profile.bundle.reverse)
     _write_cache_anchor_csr!(io, profile.anchors[1])
@@ -374,11 +379,20 @@ function _decode_prepared_profile(data::AbstractVector{UInt8})
         name = _read_cache_string(io)
         threshold = _read_cache_f32(io)
         isfinite(threshold) || return nothing
+        normalization_tag = _read_cache_string(io)
+        normalization = if normalization_tag == normalization_fingerprint(EmpiricalLogTail())
+            EmpiricalLogTail()
+        elseif startswith(normalization_tag, "hybrid-log-tail-v2;")
+            fields = Dict(split(part, "=", limit=2) for part in split(normalization_tag, ";")[2:end])
+            HybridEmpiricalLogTail(parse(Int, fields["bins"]))
+        else
+            return nothing
+        end
         forward = _read_cache_ragged(io)
         reverse = _read_cache_ragged(io)
         anchors = (_read_cache_anchor_csr(io), _read_cache_anchor_csr(io))
         eof(io) || return nothing
-        return PreparedProfile(name, StrandPair(forward, reverse), anchors, threshold)
+        return PreparedProfile(name, StrandPair(forward, reverse), anchors, threshold, normalization)
     catch
         # A checksum-valid entry can still be from an unknown or malformed
         # prepared-profile format. Treat it as a normal cache miss.

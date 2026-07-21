@@ -216,6 +216,7 @@ function build_null(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Real=0.0,
+    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
 )
     config = NullBuildConfig(;
         metric=metric, n_samples=n_samples, shuffle=shuffle, seed=seed
@@ -231,6 +232,7 @@ function build_null(
         window_radius=window_radius,
         realign_window=realign_window,
         min_logfpr=min_logfpr,
+        normalization=normalization,
     )
 end
 
@@ -245,6 +247,7 @@ function build_null(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Real=0.0,
+    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
 )
     _validate_execution_levels(outer_execution, scan_execution)
     length(models) >= 2 ||
@@ -275,6 +278,7 @@ function build_null(
             sequences;
             background=background,
             min_logfpr=min_logfpr,
+            normalization=normalization,
             scan_execution=scan_execution,
         )
         return nothing
@@ -293,6 +297,7 @@ function build_null(
                 sequences;
                 background=background,
                 min_logfpr=min_logfpr,
+                normalization=normalization,
                 scan_execution=scan_execution,
             )
         else
@@ -304,6 +309,7 @@ function build_null(
                 sequences;
                 background=background,
                 min_logfpr=min_logfpr,
+                normalization=normalization,
                 scan_execution=scan_execution,
             )
         else
@@ -349,7 +355,7 @@ function build_null(
             window_radius,
             realign_window,
             Float32(min_logfpr),
-            "empirical-log-tail-v1",
+            normalization_fingerprint(normalization),
             "profile-alignment-v1",
             seq_fingerprint,
             bg_fingerprint,

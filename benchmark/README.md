@@ -19,6 +19,9 @@ julia --project=Mimosa.jl/benchmark Mimosa.jl/benchmark/runbenchmarks.jl --basel
 
 # Run the 1-vs-50 profile comparison benchmark
 julia --project=Mimosa.jl/benchmark Mimosa.jl/benchmark/bench_1v50.jl
+
+# Compare normalization designs on 500 × 20,000 calibration sequences
+JULIA_NUM_THREADS=4 julia --project=Mimosa.jl/benchmark Mimosa.jl/benchmark/bench_normalization_options.jl
 ```
 
 ## Thread configuration

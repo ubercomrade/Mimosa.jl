@@ -31,13 +31,14 @@ function compare(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Real=0.0,
+    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)
 
     return compare(
-        prepare_profile(query; min_logfpr=Float32(min_logfpr), cache=cache),
-        prepare_profile(target; min_logfpr=Float32(min_logfpr), cache=cache);
+        prepare_profile(query; min_logfpr=Float32(min_logfpr), normalization, cache=cache),
+        prepare_profile(target; min_logfpr=Float32(min_logfpr), normalization, cache=cache);
         metric=m,
         search_range=search_range,
         window_radius=window_radius,
@@ -105,6 +106,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Real=0.0,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
+    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
     scan_execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
@@ -114,6 +116,7 @@ function compare(
         query, sequences;
         background=background,
         min_logfpr=threshold,
+        normalization=normalization,
         scan_execution=scan_execution,
         cache=cache,
     )
@@ -121,6 +124,7 @@ function compare(
         target, sequences;
         background=background,
         min_logfpr=threshold,
+        normalization=normalization,
         scan_execution=scan_execution,
         cache=cache,
     )
