@@ -68,6 +68,33 @@ end
     @test Mimosa.main(["profile", "--help"]) == 0
 end
 
+@testset "CLI normalization selection is not exposed" begin
+    query = joinpath(EXAMPLES, "scores_1.fasta")
+    target = joinpath(EXAMPLES, "scores_2.fasta")
+    base = [
+        "profile",
+        query,
+        target,
+        "--model1-type",
+        "scores",
+        "--model2-type",
+        "scores",
+    ]
+    @test Mimosa.main(vcat(base, ["--normalization", "exact"])) == 1
+    @test Mimosa.main(vcat(base, ["--normalization-bins", "4096"])) == 1
+
+    build_null_base = [
+        "build-null",
+        "motifs",
+        "--model-type",
+        "pwm",
+        "--output",
+        "null",
+    ]
+    @test Mimosa.main(vcat(build_null_base, ["--normalization", "exact"])) == 1
+    @test Mimosa.main(vcat(build_null_base, ["--normalization-bins", "4096"])) == 1
+end
+
 @testset "CLI profile: missing required args" begin
     code = Mimosa.main(["profile", "a.fasta", "b.fasta"])
     @test code == 1
@@ -212,6 +239,9 @@ end
     @test code == 0
     # Null output is a directory with manifest.toml
     @test isfile(joinpath(output_path, "manifest.toml"))
+    distribution = loadnull(output_path)
+    @test distribution.contract.normalization_version ==
+          normalization_fingerprint(HybridEmpiricalLogTail())
 
     # Annotation accepts only a bundle built for the executed strategy and metric.
     code = Mimosa.main([

@@ -133,6 +133,10 @@ The pipeline scans both models, normalizes scores to empirical `-log10(FPR)`
 values, selects anchors, and compares windows across shifts and orientations.
 A positive `offset` means that the query is shifted to the right.
 
+Hybrid empirical normalization with an exact high-score tail is the standard
+normalization used by the Julia API. The exact full-table implementation is an
+internal reference implementation rather than a selectable public strategy.
+
 Available metrics are:
 
 | Metric | Meaning |

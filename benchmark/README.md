@@ -22,6 +22,9 @@ julia --project=Mimosa.jl/benchmark Mimosa.jl/benchmark/bench_1v50.jl
 
 # Compare normalization designs on 500 × 20,000 calibration sequences
 JULIA_NUM_THREADS=4 julia --project=Mimosa.jl/benchmark Mimosa.jl/benchmark/bench_normalization_options.jl
+
+# Compare exact-tail and histogram-only normalization at increasing bin counts
+JULIA_NUM_THREADS=4 julia --project=Mimosa.jl/benchmark Mimosa.jl/benchmark/bench_histogram_only_1v50.jl
 ```
 
 ## Thread configuration
@@ -120,11 +123,10 @@ The report includes:
 - Warm-up policy
 - Sample count and seconds budget
 
-## 1-vs-50 Profile Comparison Benchmark
+## 1-vs-50 Normalization and Execution Benchmark
 
-The `bench_1v50.jl` script measures end-to-end performance of the one-to-many
-profile comparison scenario: **1 query model vs 50 target models** on random
-DNA sequences.
+The `bench_1v50.jl` script compares two end-to-end execution strategies for
+**1 query model vs 50 target models** on random DNA sequences.
 
 ### Configuration
 
@@ -134,40 +136,57 @@ DNA sequences.
 | Number of sequences | 10 000 |
 | Number of targets | 50 |
 | PWM width | 15 |
+| Hybrid bins | 65 536 |
+| Minimum log FPR | 3.0 |
 | Metric | CO (overlap coefficient) |
 | Search range | 10 |
 | Window radius | 5 |
-| Repetitions per measurement | 3 |
+| Repetitions per measurement | 5 |
+
+The benchmark compares two mutually exclusive parallel execution levels:
+
+| Case | Normalization | Target-level execution | Inner scan/normalization execution |
+|------|---------------|------------------------|------------------------------------|
+| Hybrid inner-threaded | `HybridEmpiricalLogTail` | `SerialExecution()` | `ThreadedExecution()` |
+| Exact target-threaded | `EmpiricalLogTail` | `ThreadedExecution()` | `SerialExecution()` |
+
+Mimosa does not allow nested target-level and inner multithreading. In the
+Hybrid case, targets are processed one at a time while scanning, histogram
+fitting, and score transformation use the available Julia threads. In the
+Exact case, targets are processed concurrently and each target owns a serial
+scan/normalization path. Profile alignment itself has no execution policy and
+is serial inside each target in both cases.
 
 ### Running
 
 ```bash
-# Serial (1 thread)
+# One Julia thread (both ThreadedExecution policies are effectively serial)
 JULIA_NUM_THREADS=1 julia --project=Mimosa.jl/benchmark Mimosa.jl/benchmark/bench_1v50.jl
 
-# Threaded (4 threads)
+# Meaningful strategy comparison with four Julia threads
 JULIA_NUM_THREADS=4 julia --project=Mimosa.jl/benchmark Mimosa.jl/benchmark/bench_1v50.jl
 ```
 
-### Results
+Optional workload overrides include `MIMOSA_BENCH_N_SEQUENCES`,
+`MIMOSA_BENCH_N_TARGETS`, `MIMOSA_BENCH_N_REPS`, and
+`MIMOSA_BENCH_HYBRID_BINS`. `MIMOSA_BENCH_MIN_LOGFPR` controls the exact-tail
+cutoff and defaults to `3.0`; using `0.0` makes the Hybrid exact tail cover the
+full calibration range. The report includes query preparation, 1-vs-1,
+end-to-end 1-vs-50 timing, throughput, and result deltas between Hybrid and
+Exact normalization.
 
-**Environment:** Julia 1.12.6, x86_64 Linux, 8 logical cores.
+The experimental `bench_histogram_only_1v50.jl` additionally removes the
+exact-tail collection and sort entirely. It sweeps bin counts from the
+comma-separated `MIMOSA_BENCH_HISTOGRAM_BINS` value (default:
+`65536,262144,1048576`) and reports score error plus changed offsets,
+orientations, and site counts relative to Exact normalization. Calibration
+uses a separate 500 × 20 000 bp background by default; override it with
+`MIMOSA_BENCH_BG_SEQUENCES` and `MIMOSA_BENCH_BG_LENGTH`.
 
-#### Component timings (median, 1 thread)
+### Historical comparison timings (obsolete benchmark design)
 
-| Stage | Time |
-|-------|------|
-| Sequence generation (10 000 × 100 bp) | 3.8 ms |
-| Query scan (BestStrand, 10 000 × 100, w=15) | 14.3 ms |
-| Query profile preparation (normalization + anchors) | 275.0 ms |
-| Single target scan | 13.6 ms |
-| Target precompute (50 models, scan + profile) | 919.5 ms (18.4 ms/model) |
-
-#### Historical comparison timings (median)
-
-These results predate explicit `ExecutionPolicy` selection. The old benchmark
-started Julia with four threads but still called APIs with their default
-`SerialExecution()`, so the 4-thread column is not a threaded-library result.
+These retained results predate explicit normalization and execution strategy
+selection and are not comparable with the current benchmark.
 
 | Mode | 1 thread | 4 threads |
 |------|-----------|-----------|
@@ -175,7 +194,7 @@ started Julia with four threads but still called APIs with their default
 | **1-vs-50 (profiles precomputed)** | **19 301 ms** | **17 584 ms** |
 | 1-vs-50 end-to-end (scan + compare) | 25 117 ms | 22 792 ms |
 
-#### Throughput and per-target cost
+#### Historical throughput and per-target cost
 
 | Metric | 1 thread | 4 threads |
 |--------|-----------|-----------|
@@ -185,7 +204,7 @@ started Julia with four threads but still called APIs with their default
 | Throughput (end-to-end) | 2 comparisons/sec | 2 comparisons/sec |
 | Speedup (50 vs 50×1-vs-1, pure) | 1.0× | 1.0× |
 
-### Conclusions
+### Historical conclusions (obsolete benchmark design)
 
 1. **1-vs-50 comparison takes ~19 seconds** (pure comparison with precomputed
    profiles) and **~25 seconds** end-to-end (including target scanning). The
@@ -210,7 +229,7 @@ started Julia with four threads but still called APIs with their default
    1-vs-1 time (speedup = 1.0×), confirming that each target is processed
    independently with no shared work reuse beyond the query profile.
 
-### Sample comparison output
+### Historical sample comparison output
 
 ```
 pwm_w15_s12446: score=0.4932 offset= 9 orient=++ n_sites=14952

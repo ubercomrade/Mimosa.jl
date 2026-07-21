@@ -1,24 +1,32 @@
 using Test
 using Mimosa
 
+const ExactEmpiricalLogTail = Mimosa.EmpiricalLogTail
+
 @testset "ScoreProfile validation" begin
     @test_throws ModelFormatError ScoreProfile("bad", build_ragged([Float32[0.1, NaN32]]))
 end
 
+@testset "Hybrid normalization is the API default" begin
+    profile = ScoreProfile("default", build_ragged([Float32[0.1, 0.4, 0.2]]))
+    prepared = prepare_profile(profile; min_logfpr=1.0)
+    @test prepared.normalization == HybridEmpiricalLogTail()
+end
+
 @testset "LogTailTable fit" begin
     # Empty input
-    t = fit(EmpiricalLogTail(), Float32[])
+    t = fit(ExactEmpiricalLogTail(), Float32[])
     @test length(t.scores) == 1
     @test t.scores[1] == 0.0f0
     @test t.log_tail[1] == 0.0f0
 
     # Single element
-    t = fit(EmpiricalLogTail(), Float32[5.0])
+    t = fit(ExactEmpiricalLogTail(), Float32[5.0])
     @test t.scores == [5.0f0]
     @test t.log_tail ≈ [-0.0f0] atol = 1e-6
 
     # Multiple elements
-    t = fit(EmpiricalLogTail(), Float32[1.0, 2.0, 3.0, 1.0, 2.0, 1.0])
+    t = fit(ExactEmpiricalLogTail(), Float32[1.0, 2.0, 3.0, 1.0, 2.0, 1.0])
     # Sorted descending: [3,2,2,1,1,1]
     # Unique: [3,2,1], counts: [1,2,3]
     # Cum: [1,3,6], tail_prob: [1/6,3/6,6/6]
@@ -30,12 +38,12 @@ end
 
     input = Float32[3, 2, 2, 1, -0.0f0, 0.0f0]
     original = copy(input)
-    @test fit(EmpiricalLogTail(), input).scores == Float32[3, 2, 1, 0]
+    @test fit(ExactEmpiricalLogTail(), input).scores == Float32[3, 2, 1, 0]
     @test input == original
 end
 
 @testset "LogTailTable lookup" begin
-    t = fit(EmpiricalLogTail(), Float32[1.0, 2.0, 3.0, 1.0, 2.0, 1.0])
+    t = fit(ExactEmpiricalLogTail(), Float32[1.0, 2.0, 3.0, 1.0, 2.0, 1.0])
     # scores descending: [3,2,1], log_tail: [0.778,0.301,0]
 
     # Target >= largest → index 1
@@ -54,7 +62,7 @@ end
 end
 
 @testset "transform_scores" begin
-    t = fit(EmpiricalLogTail(), Float32[1.0, 2.0, 3.0])
+    t = fit(ExactEmpiricalLogTail(), Float32[1.0, 2.0, 3.0])
     # scores: [3,2,1], log_tail: [-log10(1/3), -log10(2/3), -log10(3/3)]
     # = [0.477, 0.176, 0]
 
@@ -69,7 +77,7 @@ end
 end
 
 @testset "sorted transform matches scalar lookup" begin
-    table = fit(EmpiricalLogTail(), Float32[4, 4, 3, 1, -2, -2])
+    table = fit(ExactEmpiricalLogTail(), Float32[4, 4, 3, 1, -2, -2])
     rag = build_ragged([
         Float32[8, 4, 3.5, 3, 2, 1, 0, -2, -3],
         Float32[4, 4, -2],
@@ -95,7 +103,7 @@ end
     flat = flatten_bundle(bundle)
     @test length(flat) == 8  # 4 elements × 2 strands
 
-    t = fit(EmpiricalLogTail(), flat)
+    t = fit(ExactEmpiricalLogTail(), flat)
     normed = normalize_bundle(t, bundle)
 
     # Both strands should be transformed
@@ -110,7 +118,7 @@ end
     bundle = StrandPair(forward, reverse)
 
     fused_table, fused = Mimosa._fit_normalize_empirical(bundle)
-    reference_table = fit(EmpiricalLogTail(), flatten_bundle(bundle))
+    reference_table = fit(ExactEmpiricalLogTail(), flatten_bundle(bundle))
     reference = normalize_bundle(reference_table, bundle)
 
     @test fused_table.scores == reference_table.scores

@@ -216,7 +216,7 @@ function build_null(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Real=0.0,
-    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
+    normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
 )
     config = NullBuildConfig(;
         metric=metric, n_samples=n_samples, shuffle=shuffle, seed=seed
@@ -247,7 +247,7 @@ function build_null(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Real=0.0,
-    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
+    normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
 )
     _validate_execution_levels(outer_execution, scan_execution)
     length(models) >= 2 ||

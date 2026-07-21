@@ -794,7 +794,7 @@ function PreparedProfile(
     bundle::StrandPair{<:RaggedArray{Float32}},
     anchors::Tuple{AnchorCSR,AnchorCSR},
     min_logfpr::Float32,
-    normalization::S=EmpiricalLogTail(),
+    normalization::S=HybridEmpiricalLogTail(),
 ) where {S<:AbstractNormalizationStrategy}
     threshold = min_logfpr
     isfinite(threshold) || throw(ArgumentError("min_logfpr must be finite."))
@@ -857,7 +857,7 @@ Keyword arguments:
 function prepare_profile(
     model::ScoreProfile;
     min_logfpr::Real=0.0,
-    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
+    normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
     scan_execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
@@ -887,7 +887,7 @@ function prepare_profile(
     sequences::EncodedSequenceBatch;
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
     min_logfpr::Real=0.0,
-    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
+    normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
     scan_execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
@@ -1155,7 +1155,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Union{Nothing,Real}=nothing,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
-    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
+    normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
     scan_execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )
@@ -1263,7 +1263,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Real=0.0,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
-    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
+    normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
     cache=nothing,
 )
     _validate_execution_levels(outer_execution, scan_execution)

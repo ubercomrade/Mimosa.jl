@@ -25,10 +25,17 @@ abstract type AbstractNormalizationStrategy end
 
 struct EmpiricalLogTail <: AbstractNormalizationStrategy end
 
+"""
+    HybridEmpiricalLogTail(; bins=65_536)
+
+Default empirical `-log10(tail)` normalization strategy. The bulk of the
+score distribution is represented by an equal-width histogram, while the
+tail used for threshold anchors is retained exactly.
+"""
 struct HybridEmpiricalLogTail <: AbstractNormalizationStrategy
     bins::Int
 
-    function HybridEmpiricalLogTail(bins::Integer=65_536)
+    function HybridEmpiricalLogTail(bins::Integer)
         b = Int(bins)
         b >= 256 && b <= 1_048_576 ||
             throw(ArgumentError("hybrid normalization bins must be in 256:1_048_576."))
@@ -38,6 +45,14 @@ struct HybridEmpiricalLogTail <: AbstractNormalizationStrategy
 end
 
 HybridEmpiricalLogTail(; bins::Integer=65_536) = HybridEmpiricalLogTail(bins)
+
+"""
+    normalization_fingerprint(strategy)
+
+Return the stable identifier used to record normalization compatibility in
+caches and null distributions.
+"""
+function normalization_fingerprint end
 
 function normalization_fingerprint(::EmpiricalLogTail)
     return "empirical-log-tail-v1"
@@ -89,6 +104,13 @@ function fit(::EmpiricalLogTail, scores::AbstractVector{T}) where {T<:Real}
     return _fit_empirical_table!(values)
 end
 
+"""
+    HybridLogTailTable
+
+Fitted lookup table produced by [`HybridEmpiricalLogTail`](@ref). It combines
+histogram values for the body of the distribution with an exact empirical
+table for the selected tail.
+"""
 struct HybridLogTailTable
     minimum::Float32
     bin_width::Float32
@@ -142,9 +164,10 @@ function fit(strategy::HybridEmpiricalLogTail, scores::AbstractVector{T};
         running += counts[i]
         cumulative[i] = running
     end
-    isfinite(tail_logfpr) && tail_logfpr >= 0 ||
-        throw(ArgumentError("tail_logfpr must be finite and non-negative."))
-    cutoff_count = max(UInt64(1), ceil(UInt64, Float64(n) * 10.0 ^ (-Float64(tail_logfpr))))
+    isfinite(tail_logfpr) || throw(ArgumentError("tail_logfpr must be finite."))
+    effective_tail_logfpr = max(0.0, Float64(tail_logfpr))
+    cutoff_count =
+        max(UInt64(1), ceil(UInt64, Float64(n) * 10.0 ^ (-effective_tail_logfpr)))
     # `cumulative` is indexed from low to high scores and decreases with the
     # index; choose the highest bin whose tail still reaches the threshold.
     cutoff_bin = findlast(>=(cutoff_count), cumulative)
@@ -161,9 +184,6 @@ function fit(strategy::HybridEmpiricalLogTail, scores::AbstractVector{T};
     end
     return HybridLogTailTable(lo, width, histogram_log_tail, exact)
 end
-
-fit(strategy::HybridEmpiricalLogTail, scores::AbstractVector{T}) where {T<:Real} =
-    fit(strategy, scores; scan_execution=SerialExecution())
 
 function _empirical_workspace(bundle::StrandPair{<:RaggedArray{Float32}})
     fwd = bundle.forward.data

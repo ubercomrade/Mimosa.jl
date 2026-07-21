@@ -237,7 +237,7 @@ end
 @testset "LogTailTable fit/transform round-trip" begin
     # Fit from a sample, then transform the same sample
     sample = Float32[0.1, 0.5, 0.9, 0.3, 0.7, 0.5, 0.1]
-    table = fit(EmpiricalLogTail(), sample)
+    table = fit(Mimosa.EmpiricalLogTail(), sample)
     rag = build_ragged([sample])
     transformed = transform_scores(table, rag)
     # Each unique score maps to a unique log-tail value

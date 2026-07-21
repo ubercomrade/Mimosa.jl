@@ -167,7 +167,7 @@ function _validate_null_compatibility(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Float32=0.0f0,
-    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
+    normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
     model_types::Union{Nothing,Tuple{String,String}}=nothing,
 )
     dist.strategy == strategy || throw(
@@ -229,7 +229,7 @@ function _annotate_cli_result(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Float32=0.0f0,
-    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
+    normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
     model_types::Union{Nothing,Tuple{String,String}}=nothing,
 )
     "pvalue" in parsed.flags || return result
@@ -298,8 +298,6 @@ function _print_profile_help(io::IO)
     )
     println(io, "  --realign-window <n>     Local realignment half-width (default: 3)")
     println(io, "  --min-logfpr <f>         Threshold logFPR (0 = best site per sequence)")
-    println(io, "  --normalization <name>   exact or hybrid (default: exact)")
-    println(io, "  --normalization-bins <n> Hybrid histogram bins (default: 65536)")
     println(io, "")
     println(io, "Sequence options:")
     println(io, "  --fasta <path>            FASTA for motif scanning")
@@ -327,18 +325,6 @@ function _print_profile_help(io::IO)
     println(io, "  --quiet                   Suppress informational output")
     println(io, "  --verbose                 Verbose diagnostics to stderr")
     return nothing
-end
-
-function _cli_normalization(parsed::CLIParsed)
-    name = get(parsed.options, "normalization", "exact")
-    name == "exact" && return EmpiricalLogTail()
-    name == "hybrid" || throw(CLIError("--normalization must be exact or hybrid."))
-    bins = _cli_int(parsed, "normalization-bins", "65536"; minimum=256)
-    try
-        return HybridEmpiricalLogTail(bins)
-    catch error
-        throw(CLIError(string(error)))
-    end
 end
 
 function _run_profile(parsed::CLIParsed)
@@ -379,7 +365,7 @@ function _run_profile(parsed::CLIParsed)
     execution = _execution_policy(parsed)
     cache =
         haskey(parsed.options, "cache-dir") ? Cache(parsed.options["cache-dir"]) : nothing
-    normalization = _cli_normalization(parsed)
+    normalization = HybridEmpiricalLogTail()
 
     model1 = _read_typed_model(path1, type1; background=bg_freq)
     model2 = _read_typed_model(path2, type2; background=bg_freq)
@@ -570,7 +556,7 @@ function _run_build_null(parsed::CLIParsed)
     isfinite(min_logfpr) || throw(CLIError("--min-logfpr must be a finite number."))
 
     exec_policy = _execution_policy(parsed)
-    normalization = _cli_normalization(parsed)
+    normalization = HybridEmpiricalLogTail()
 
     sequences = if isnothing(fasta)
         make_random_sequences(num_seq, seq_len; seed=seed)
@@ -714,8 +700,6 @@ function _cli_settings()
         "--window-radius"
         "--realign-window"
         "--min-logfpr"
-        "--normalization"
-        "--normalization-bins"
         "--fasta"
         "--background"
         "--num-sequences"
@@ -750,8 +734,6 @@ function _cli_settings()
         "--window-radius"
         "--realign-window"
         "--min-logfpr"
-        "--normalization"
-        "--normalization-bins"
         "--threads"
         "--shuffle"
         action = :store_true

@@ -296,7 +296,7 @@ function prepared_profile_cache_key(
     sequences::Union{Nothing,EncodedSequenceBatch}=nothing;
     background::Union{Nothing,EncodedSequenceBatch}=nothing,
     min_logfpr::Real=0.0f0,
-    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
+    normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
 )
     is_motif = source isa AbstractMotifModel
     is_motif && sequences === nothing && throw(

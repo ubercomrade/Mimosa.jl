@@ -534,6 +534,7 @@ function main()
         for threshold in (0.0f0, 3.0f0)
             query = prepare_profile(
                 query_model, foreground; background=background, min_logfpr=threshold,
+                normalization=Mimosa.EmpiricalLogTail(),
                 scan_execution=ThreadedExecution(),
             )
             compared = compare_variants(exact_bundle, hybrid_prepared.bundle, query, threshold)

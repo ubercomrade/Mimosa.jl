@@ -17,7 +17,7 @@ Keyword arguments:
 
 The comparison pipeline:
 1. Resolve profile bundles (both strands = same scores for ScoreProfile).
-2. Fit `EmpiricalLogTail` normalization from each model's own scores.
+2. Fit hybrid empirical log-tail normalization from each model's own scores.
 3. Apply normalization to both strands.
 4. Collect anchors (best per row or threshold).
 5. Score all four orientation pairs across all shifts.
@@ -31,7 +31,7 @@ function compare(
     window_radius::Int=10,
     realign_window::Int=3,
     min_logfpr::Real=0.0,
-    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
+    normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
     cache=nothing,
 )
     m = _resolve_profile_metric(metric)
@@ -106,7 +106,7 @@ function compare(
     realign_window::Int=3,
     min_logfpr::Real=0.0,
     background::Union{EncodedSequenceBatch,Nothing}=nothing,
-    normalization::AbstractNormalizationStrategy=EmpiricalLogTail(),
+    normalization::AbstractNormalizationStrategy=HybridEmpiricalLogTail(),
     scan_execution::ExecutionPolicy=SerialExecution(),
     cache=nothing,
 )

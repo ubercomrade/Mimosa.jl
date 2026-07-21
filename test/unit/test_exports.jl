@@ -30,3 +30,10 @@ using Mimosa
     end
     @test isempty(missing_docs)
 end
+
+@testset "Normalization public API" begin
+    exported = names(Mimosa; all=false)
+    @test :HybridEmpiricalLogTail in exported
+    @test :EmpiricalLogTail ∉ exported
+    @test :LogTailTable ∉ exported
+end
